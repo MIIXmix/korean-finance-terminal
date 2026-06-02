@@ -1,0 +1,2507 @@
+import {
+  Activity,
+  Bell,
+  Bot,
+  CandlestickChart,
+  Database,
+  Gauge,
+  GripVertical,
+  KeyRound,
+  LayoutDashboard,
+  Lock,
+  Maximize2,
+  Newspaper,
+  PanelsLeftRight,
+  RefreshCw,
+  Save,
+  Search,
+  Settings,
+  ShieldAlert,
+  Check,
+  Pencil,
+  Star,
+  Trash2,
+  WalletCards,
+  X,
+} from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { FormEvent, ReactNode } from 'react'
+import { TradingChart } from './TradingChart'
+import { Heatmap } from './Heatmap'
+import './App.css'
+
+type Status = 'ok' | 'live' | 'delayed' | 'api_required' | 'not_available' | 'error' | 'loading'
+
+type Quote = {
+  symbol: string
+  name?: string
+  price?: number
+  change?: number
+  changePercent?: number
+  currency?: string
+  status: Status
+  message?: string
+  source?: string
+  asOf?: string
+}
+
+type KoreaUniverseItem = {
+  market: 'KOSPI' | 'KOSDAQ'
+  code: string
+  symbol: string
+  name: string
+  price?: number
+  changePercent?: number
+  marketCap?: number
+  volume?: number
+  per?: number
+  roe?: number
+  screenScore?: number
+  status: Status
+  message?: string
+  source?: string
+}
+
+type KoreaUniverseResponse = {
+  status: Status
+  message?: string
+  market?: string
+  query?: string
+  count?: number
+  total?: number
+  coverage?: string
+  source?: string
+  sourceMode?: string
+  asOf?: string
+  items: KoreaUniverseItem[]
+}
+
+type ChartPoint = {
+  time: string
+  open: number | null
+  high: number | null
+  low: number | null
+  close: number | null
+  volume: number | null
+  sma5: number | null
+  sma20: number | null
+  sma50: number | null
+  sma60: number | null
+  sma120: number | null
+  ema20: number | null
+  bbUpper: number | null
+  bbLower: number | null
+  rsi14: number | null
+  macd: number | null
+  macdSignal: number | null
+  macdHist: number | null
+  stochK: number | null
+  stochD: number | null
+  atr14: number | null
+  obv: number | null
+  vwap: number | null
+  adx: number | null
+  plusDi: number | null
+  minusDi: number | null
+  psar: number | null
+  pivot: number | null
+  pivotR1: number | null
+  pivotS1: number | null
+  pivotR2: number | null
+  pivotS2: number | null
+  ichimokuTenkan: number | null
+  ichimokuKijun: number | null
+  ichimokuSenkouA: number | null
+  ichimokuSenkouB: number | null
+  ichimokuChikou: number | null
+}
+
+type ChartResponse = {
+  symbol: string
+  period?: string
+  interval?: string
+  status: Status
+  message?: string
+  source?: string
+  asOf?: string
+  points: ChartPoint[]
+}
+
+type NewsItem = {
+  title: string
+  translatedTitle: string
+  summary: string
+  koreanSummary: string
+  url: string
+  publishedAt: string
+  sentiment: { label: string; score: number; method: string }
+  relatedTickers: string[]
+  importance: string
+  translationStatus: string
+  source: string
+}
+
+type PortfolioSummary = {
+  status: Status
+  message: string
+  holdings: Array<Record<string, any>>
+  totals: { marketValue: number; cost: number; pnl: number; pnlPercent: number | null; currency?: string }
+  allocations: Record<string, Array<{ name: string; value: number; weight: number }>>
+  baseCurrency?: string
+  fxRate?: number | null
+  warnings?: string[]
+}
+
+type TabId = 'markets' | 'heatmap' | 'monitor' | 'chart' | 'news' | 'portfolio' | 'options' | 'orders' | 'ai'
+type ColumnId = 'left' | 'center' | 'right'
+
+type LayoutState = {
+  panels: { left: number; right: number }
+  tabs: Record<TabId, Record<ColumnId, string[]>>
+  widgetHeights: Record<string, number>
+}
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
+
+const tabs: Array<{ id: TabId; label: string }> = [
+  { id: 'markets', label: '시장' },
+  { id: 'heatmap', label: '히트맵' },
+  { id: 'monitor', label: '모니터' },
+  { id: 'chart', label: '차트' },
+  { id: 'news', label: '뉴스' },
+  { id: 'portfolio', label: '포트폴리오' },
+  { id: 'options', label: '옵션' },
+  { id: 'orders', label: '주문' },
+  { id: 'ai', label: 'AI' },
+]
+
+const defaultLayout: LayoutState = {
+  panels: { left: 260, right: 360 },
+  widgetHeights: {
+    chart: 520,
+    heatmap: 680,
+    koreaUniverse: 430,
+    news: 265,
+    portfolio: 330,
+    order: 280,
+    ai: 260,
+    fxRates: 196,
+  },
+  tabs: {
+    markets: {
+      left: ['favorites', 'fxRates', 'marketPulse', 'koreaUniverse', 'watchGrid', 'sectorMap', 'flowRadar'],
+      center: ['symbolHeader', 'chart', 'riskEngine', 'news'],
+      right: ['order', 'filings', 'earnings', 'ai'],
+    },
+    heatmap: {
+      left: ['favorites'],
+      center: ['heatmap'],
+      right: [],
+    },
+    monitor: {
+      left: ['favorites', 'marketPulse', 'koreaUniverse', 'watchGrid'],
+      center: ['monitorGrid', 'news', 'riskEngine'],
+      right: ['ai', 'dataStatus'],
+    },
+    chart: {
+      left: ['favorites', 'koreaUniverse', 'watchGrid', 'chartControls'],
+      center: ['symbolHeader', 'chart', 'indicatorStack'],
+      right: ['filings', 'ai'],
+    },
+    news: {
+      left: ['favorites', 'watchGrid', 'dataStatus'],
+      center: ['news', 'filings'],
+      right: ['ai', 'earnings'],
+    },
+    portfolio: {
+      left: ['portfolioControls', 'fxRates', 'watchGrid'],
+      center: ['portfolio', 'portfolioRisk'],
+      right: ['ai', 'dataStatus'],
+    },
+    options: {
+      left: ['watchGrid', 'chartControls'],
+      center: ['optionsFlow', 'chart'],
+      right: ['order', 'ai'],
+    },
+    orders: {
+      left: ['brokerStatus', 'watchGrid'],
+      center: ['order', 'paperOrdersPolicy'],
+      right: ['dataStatus', 'ai'],
+    },
+    ai: {
+      left: ['dataStatus', 'watchGrid'],
+      center: ['ai', 'news', 'filings'],
+      right: ['portfolioRisk', 'brokerStatus'],
+    },
+  },
+}
+
+const widgetTitles: Record<string, { title: string; icon: ReactNode }> = {
+  favorites: { title: '관심종목 / FAVORITES', icon: <Star size={14} /> },
+  heatmap: { title: '섹터 히트맵 / SECTOR MAP', icon: <LayoutDashboard size={14} /> },
+  fxRates: { title: '환율 / FX', icon: <Activity size={14} /> },
+  marketPulse: { title: 'MARKET PULSE', icon: <Gauge size={14} /> },
+  koreaUniverse: { title: 'KOREA UNIVERSE', icon: <Search size={14} /> },
+  watchGrid: { title: 'WATCH GRID', icon: <Activity size={14} /> },
+  sectorMap: { title: 'SECTOR / COUNTRY MAP', icon: <LayoutDashboard size={14} /> },
+  flowRadar: { title: 'FLOW RADAR', icon: <PanelsLeftRight size={14} /> },
+  symbolHeader: { title: 'SNAPSHOT', icon: <Database size={14} /> },
+  chart: { title: 'PRICE ACTION / TECH STACK', icon: <CandlestickChart size={14} /> },
+  riskEngine: { title: 'TECH / RISK ENGINE', icon: <ShieldAlert size={14} /> },
+  news: { title: 'TOP NEWS / TRANSLATION', icon: <Newspaper size={14} /> },
+  order: { title: 'ORDER & EXECUTION', icon: <WalletCards size={14} /> },
+  filings: { title: 'SEC EDGAR / DART', icon: <Database size={14} /> },
+  earnings: { title: 'EARNINGS / DIVIDEND', icon: <Bell size={14} /> },
+  ai: { title: 'AI TRADE ASSISTANT', icon: <Bot size={14} /> },
+  monitorGrid: { title: 'MULTI-ASSET MONITOR', icon: <Activity size={14} /> },
+  dataStatus: { title: 'DATA PROVIDER STATUS', icon: <Database size={14} /> },
+  chartControls: { title: 'CHART CONTROLS', icon: <Settings size={14} /> },
+  indicatorStack: { title: 'RSI / MACD DETAIL', icon: <Activity size={14} /> },
+  portfolioControls: { title: 'PORTFOLIO INPUT', icon: <WalletCards size={14} /> },
+  portfolio: { title: 'PORTFOLIO', icon: <WalletCards size={14} /> },
+  portfolioRisk: { title: 'PORTFOLIO RISK', icon: <ShieldAlert size={14} /> },
+  optionsFlow: { title: 'OPTIONS FLOW INTELLIGENCE', icon: <Activity size={14} /> },
+  brokerStatus: { title: 'BROKER CONNECTORS', icon: <Lock size={14} /> },
+  paperOrdersPolicy: { title: 'PAPER / LIVE TRADING GUARD', icon: <ShieldAlert size={14} /> },
+}
+
+function Terminal({ token, onLock }: { token: string; onLock: () => void }) {
+  const [activeTab, setActiveTab] = useState<TabId>('markets')
+  const [selectedSymbol, setSelectedSymbol] = useState('AAPL')
+  const [command, setCommand] = useState('AAPL')
+  const [searchResults, setSearchResults] = useState<Array<{ symbol: string; name: string; exchange: string; type: string }>>([])
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [period, setPeriod] = useState('1Y')
+  const [chartInterval, setChartInterval] = useState('1D')
+  const [layout, setLayout] = useState<LayoutState>(() => loadLocalLayout())
+  const [overview, setOverview] = useState<{ quotes: Quote[]; breadth?: any; status?: string } | null>(null)
+  const [favorites, setFavorites] = useState<Array<{ symbol: string; name?: string }>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('kft_favorites') || '[]')
+    } catch {
+      return []
+    }
+  })
+  const [favQuotes, setFavQuotes] = useState<Quote[]>([])
+  const [koreaMarket, setKoreaMarket] = useState<'KOSPI' | 'KOSDAQ'>('KOSPI')
+  const [koreaQuery, setKoreaQuery] = useState('')
+  const [koreaUniverse, setKoreaUniverse] = useState<KoreaUniverseResponse>({
+    status: 'loading',
+    items: [],
+    message: '한국 종목 목록 로딩 중',
+  })
+  const [chart, setChart] = useState<ChartResponse>({ symbol: 'AAPL', status: 'loading', points: [] })
+  const [news, setNews] = useState<{ status: Status; message?: string; items: NewsItem[] }>({ status: 'loading', items: [] })
+  const [sec, setSec] = useState<any>({ status: 'loading', items: [] })
+  const [dart, setDart] = useState<any>({ status: 'loading', items: [] })
+  const [options, setOptions] = useState<any>({ status: 'loading', calls: [], puts: [] })
+  const [health, setHealth] = useState<any>(null)
+  const [brokers, setBrokers] = useState<any>({ providers: [] })
+  const [aiResult, setAiResult] = useState<any>(null)
+  const [portfolio, setPortfolio] = useState<PortfolioSummary | null>(null)
+  const [portfolioFocus, setPortfolioFocus] = useState(false)
+  const [selectedLiveQuote, setSelectedLiveQuote] = useState<Quote | null>(null)
+  const [dragWidget, setDragWidget] = useState<string | null>(null)
+  const [dragPanel, setDragPanel] = useState<'left' | 'right' | null>(null)
+  const shellRef = useRef<HTMLDivElement | null>(null)
+
+  const authHeaders = useMemo<Record<string, string>>(() => ({ Authorization: token ? `Bearer ${token}` : '' }), [token])
+
+  const selectedQuote = useMemo(
+    () =>
+      overview?.quotes?.find((item) => item.symbol === selectedSymbol.toUpperCase()) ||
+      selectedLiveQuote ||
+      undefined,
+    [overview, selectedSymbol, selectedLiveQuote],
+  )
+
+  const persistLayout = useCallback(
+    async (next: LayoutState) => {
+      localStorage.setItem('kft_layout', JSON.stringify(next))
+      if (token) {
+        try {
+          await apiFetch('/api/settings/layout', {
+            method: 'PUT',
+            headers: { ...authHeaders, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: next }),
+          })
+        } catch {
+          localStorage.setItem('kft_layout_pending', '1')
+        }
+      }
+    },
+    [authHeaders, token],
+  )
+
+  const updateLayout = useCallback(
+    (updater: (current: LayoutState) => LayoutState) => {
+      setLayout((current) => {
+        const next = updater(current)
+        void persistLayout(next)
+        return next
+      })
+    },
+    [persistLayout],
+  )
+
+  const loadMarket = useCallback(async () => {
+    const data = await apiFetch('/api/market/overview')
+    setOverview(data)
+  }, [])
+
+  const toggleFavorite = useCallback((symbol: string, name?: string) => {
+    setFavorites((prev) => {
+      const exists = prev.some((f) => f.symbol === symbol)
+      const next = exists ? prev.filter((f) => f.symbol !== symbol) : [...prev, { symbol, name }]
+      localStorage.setItem('kft_favorites', JSON.stringify(next))
+      return next
+    })
+  }, [])
+
+  const loadFavQuotes = useCallback(async () => {
+    if (!favorites.length) {
+      setFavQuotes([])
+      return
+    }
+    const symbols = favorites.map((f) => f.symbol).join(',')
+    try {
+      const data = await apiFetch(`/api/market/quotes?symbols=${encodeURIComponent(symbols)}`)
+      setFavQuotes(data.quotes || [])
+    } catch {
+      setFavQuotes([])
+    }
+  }, [favorites])
+
+  const loadKoreaUniverse = useCallback(async (market: string, query: string) => {
+    setKoreaUniverse((current) => ({ ...current, status: 'loading', message: '한국 종목 목록 로딩 중' }))
+    const params = new URLSearchParams({ market, query, limit: '160' })
+    const data = await apiFetch(`/api/market/korea/universe?${params.toString()}`)
+    setKoreaUniverse(data)
+  }, [])
+
+  const loadBackground = useCallback(async () => {
+    const [newsData, secData, dartData, optionsData, brokerData, healthData] = await Promise.allSettled([
+      apiFetch(`/api/news?symbol=${encodeURIComponent(selectedSymbol)}&limit=12`),
+      apiFetch(`/api/filings/sec?symbol=${encodeURIComponent(selectedSymbol)}&limit=12`),
+      apiFetch(`/api/filings/dart?symbol=${encodeURIComponent(selectedSymbol)}&limit=12`),
+      apiFetch(`/api/options?symbol=${encodeURIComponent(selectedSymbol)}`),
+      apiFetch('/api/brokers'),
+      apiFetch('/api/config-status'),
+    ])
+    if (newsData.status === 'fulfilled') setNews(newsData.value)
+    if (secData.status === 'fulfilled') setSec(secData.value)
+    if (dartData.status === 'fulfilled') setDart(dartData.value)
+    if (optionsData.status === 'fulfilled') setOptions(optionsData.value)
+    if (brokerData.status === 'fulfilled') setBrokers(brokerData.value)
+    if (healthData.status === 'fulfilled') setHealth(healthData.value)
+  }, [selectedSymbol])
+
+  const loadChart = useCallback(async () => {
+    setChart((prev) => ({ ...prev, status: 'loading', points: [] }))
+    const data = await apiFetch(
+      `/api/market/chart?symbol=${encodeURIComponent(selectedSymbol)}&period=${period}&interval=${chartInterval}`,
+    )
+    setChart(data)
+  }, [chartInterval, period, selectedSymbol])
+
+  const loadPortfolio = useCallback(async () => {
+    if (!token) {
+      setPortfolio(null)
+      return
+    }
+    try {
+      const data = await apiFetch('/api/portfolio/summary', { headers: authHeaders })
+      setPortfolio(data)
+    } catch {
+      setPortfolio(null)
+    }
+  }, [authHeaders, token])
+
+  useEffect(() => {
+    void loadMarket()
+  }, [loadMarket])
+
+  useEffect(() => {
+    void loadFavQuotes()
+  }, [loadFavQuotes])
+
+  useEffect(() => {
+    let cancelled = false
+    setSelectedLiveQuote(null)
+    void apiFetch(`/api/market/quotes?symbols=${encodeURIComponent(selectedSymbol)}`)
+      .then((data) => {
+        if (!cancelled) setSelectedLiveQuote((data.quotes || [])[0] || null)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [selectedSymbol])
+
+  useEffect(() => {
+    const q = command.trim()
+    if (!q) {
+      setSearchResults([])
+      return
+    }
+    const handle = setTimeout(() => {
+      void apiFetch(`/api/market/search?q=${encodeURIComponent(q)}`)
+        .then((data) => setSearchResults(data.results || []))
+        .catch(() => setSearchResults([]))
+    }, 250)
+    return () => clearTimeout(handle)
+  }, [command])
+
+  useEffect(() => {
+    void loadKoreaUniverse(koreaMarket, '')
+  }, [koreaMarket, loadKoreaUniverse])
+
+  useEffect(() => {
+    void loadChart()
+  }, [loadChart])
+
+  useEffect(() => {
+    void loadBackground()
+  }, [loadBackground])
+
+  useEffect(() => {
+    void loadPortfolio()
+  }, [loadPortfolio])
+
+  useEffect(() => {
+    if (!token) return
+    void apiFetch('/api/settings/layout', { headers: authHeaders })
+      .then((data) => {
+        if (data.value && Object.keys(data.value).length) {
+          setLayout(mergeLayout(data.value))
+          localStorage.setItem('kft_layout', JSON.stringify(mergeLayout(data.value)))
+        }
+      })
+      .catch(() => undefined)
+  }, [authHeaders, token])
+
+  useEffect(() => {
+    if (!dragPanel) return
+    const onMove = (event: PointerEvent) => {
+      const rect = shellRef.current?.getBoundingClientRect()
+      if (!rect) return
+      updateLayout((current) => {
+        if (dragPanel === 'left') {
+          const left = clamp(event.clientX - rect.left, 210, 430)
+          return { ...current, panels: { ...current.panels, left } }
+        }
+        const right = clamp(rect.right - event.clientX, 280, 520)
+        return { ...current, panels: { ...current.panels, right } }
+      })
+    }
+    const onUp = () => setDragPanel(null)
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [dragPanel, updateLayout])
+
+  const pickSearch = (symbol: string) => {
+    setSelectedSymbol(symbol)
+    setCommand(symbol)
+    setSearchResults([])
+    setSearchOpen(false)
+    setActiveTab('chart')
+  }
+
+  const submitCommand = (event: FormEvent) => {
+    event.preventDefault()
+    if (searchResults.length) {
+      pickSearch(searchResults[0].symbol)
+      return
+    }
+    const symbol = command.trim().toUpperCase()
+    if (!symbol) return
+    setSelectedSymbol(symbol)
+    setActiveTab('chart')
+    setSearchOpen(false)
+  }
+
+  const runAi = async () => {
+    setActiveTab('ai')
+    setAiResult({ status: 'loading', summary: '분석 중...' })
+    const payload = {
+      symbol: selectedSymbol,
+      quote: selectedQuote,
+      chart,
+      news: news.items?.slice(0, 5) || [],
+      portfolio,
+    }
+    const result = await apiFetch('/api/ai/analyze', {
+      method: 'POST',
+      headers: { ...authHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payload }),
+    })
+    setAiResult(result)
+  }
+
+  const reorderWidget = (targetColumn: ColumnId, targetId?: string) => {
+    if (!dragWidget) return
+    updateLayout((current) => {
+      const next = structuredClone(current) as LayoutState
+      for (const column of ['left', 'center', 'right'] as ColumnId[]) {
+        next.tabs[activeTab][column] = next.tabs[activeTab][column].filter((id) => id !== dragWidget)
+      }
+      const targetList = next.tabs[activeTab][targetColumn]
+      const targetIndex = targetId ? targetList.indexOf(targetId) : -1
+      if (targetIndex >= 0) targetList.splice(targetIndex, 0, dragWidget)
+      else targetList.push(dragWidget)
+      return next
+    })
+    setDragWidget(null)
+  }
+
+  const onWidgetHeight = (id: string, height: number) => {
+    if (id === 'heatmap') return // fixed-height widget; surface manages its own size
+    if (height < 120) return
+    if (id === 'chart' && height < 440) return
+    setLayout((current) => ({
+      ...current,
+      widgetHeights: { ...current.widgetHeights, [id]: Math.round(height) },
+    }))
+  }
+
+  const saveVisibleLayout = () => {
+    void persistLayout(layout)
+  }
+
+  const renderWidget = (id: string) => {
+    const common = {
+      selectedSymbol,
+      selectedQuote,
+      overview,
+      favorites,
+      favQuotes,
+      toggleFavorite,
+      koreaUniverse,
+      koreaMarket,
+      koreaQuery,
+      chart,
+      news,
+      sec,
+      dart,
+      options,
+      health,
+      brokers,
+      portfolio,
+      token,
+      authHeaders,
+      period,
+      interval: chartInterval,
+      setPeriod,
+      setInterval: setChartInterval,
+      setSelectedSymbol,
+      setCommand,
+      setActiveTab,
+      setKoreaMarket,
+      setKoreaQuery,
+      loadKoreaUniverse,
+      reload: async () => {
+        await Promise.all([loadMarket(), loadFavQuotes(), loadChart(), loadBackground(), loadPortfolio()])
+      },
+      runAi,
+      aiResult,
+      onLock,
+      loadPortfolio,
+      setPortfolioFocus,
+    }
+    switch (id) {
+      case 'heatmap':
+        return <Heatmap authHeaders={authHeaders} />
+      case 'fxRates':
+        return <FxRates authHeaders={authHeaders} />
+      case 'favorites':
+        return <FavoritesPanel {...common} />
+      case 'marketPulse':
+        return <MarketPulse {...common} />
+      case 'koreaUniverse':
+        return <KoreaUniversePanel {...common} />
+      case 'watchGrid':
+        return <WatchGrid {...common} />
+      case 'sectorMap':
+        return <SectorMap {...common} />
+      case 'flowRadar':
+        return <FlowRadar {...common} />
+      case 'symbolHeader':
+        return <SymbolHeader {...common} />
+      case 'chart':
+        return <ChartPanel {...common} />
+      case 'riskEngine':
+        return <RiskEngine {...common} />
+      case 'news':
+        return <NewsPanel {...common} />
+      case 'order':
+        return <OrderPanel {...common} />
+      case 'filings':
+        return <FilingsPanel {...common} />
+      case 'earnings':
+        return <EarningsPanel {...common} />
+      case 'ai':
+        return <AiPanel {...common} />
+      case 'monitorGrid':
+        return <MonitorGrid {...common} />
+      case 'dataStatus':
+        return <DataStatus {...common} />
+      case 'chartControls':
+        return <ChartControls {...common} />
+      case 'indicatorStack':
+        return <IndicatorStack {...common} />
+      case 'portfolioControls':
+        return <PortfolioControls {...common} />
+      case 'portfolio':
+        return <PortfolioPanel {...common} />
+      case 'portfolioRisk':
+        return <PortfolioRisk {...common} />
+      case 'optionsFlow':
+        return <OptionsPanel {...common} />
+      case 'brokerStatus':
+        return <BrokerStatus {...common} />
+      case 'paperOrdersPolicy':
+        return <PaperPolicy />
+      default:
+        return <EmptyState text="위젯 없음" />
+    }
+  }
+
+  return (
+    <div className="terminal">
+      <header className="terminal-top">
+        <div className="brand">
+          <span className="brand-mark">KT</span>
+          <span>
+            <strong>한국어 금융 터미널</strong>
+            <small>US/KR EQUITY INTEL</small>
+          </span>
+        </div>
+        <nav className="global-menu">
+          {(['Markets', 'Maps', 'Portfolio', 'Research', 'Tools', 'AI'] as const).map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() =>
+                setActiveTab(
+                  item === 'Portfolio'
+                    ? 'portfolio'
+                    : item === 'AI'
+                      ? 'ai'
+                      : item === 'Maps'
+                        ? 'heatmap'
+                        : 'markets',
+                )
+              }
+            >
+              {item}
+            </button>
+          ))}
+        </nav>
+        <form className="command" onSubmit={submitCommand} autoComplete="off">
+          <Search size={14} />
+          <input
+            value={command}
+            onChange={(event) => {
+              setCommand(event.target.value)
+              setSearchOpen(true)
+            }}
+            onFocus={() => setSearchOpen(true)}
+            onBlur={() => window.setTimeout(() => setSearchOpen(false), 150)}
+            placeholder="회사명/티커 검색: 삼성전자, 카카오, Apple, AAPL"
+          />
+          {searchOpen && searchResults.length > 0 && (
+            <ul className="search-dropdown">
+              {searchResults.map((result) => (
+                <li key={result.symbol}>
+                  <button
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => pickSearch(result.symbol)}
+                  >
+                    <strong>
+                      {result.type ? <em className={`search-type t-${result.type.toLowerCase()}`}>{quoteTypeLabel(result.type)}</em> : null}
+                      {result.name}
+                    </strong>
+                    <span>
+                      {result.symbol}
+                      {result.exchange ? ` · ${result.exchange}` : ''}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </form>
+        <button className="ai-button" type="button" onClick={runAi}>
+          <Bot size={14} /> AI
+        </button>
+        <div className="session-state">
+          <span className="dot"></span>
+          <span className="session-label">잠금 해제됨</span>
+          <button type="button" className="lock-button" onClick={onLock} title="앱 잠금">
+            <Lock size={13} /> 잠금
+          </button>
+        </div>
+      </header>
+
+      <section className="index-strip">
+        {(overview?.quotes || []).slice(0, 10).map((quote) => (
+          <button key={quote.symbol} type="button" onClick={() => { setSelectedSymbol(quote.symbol); setCommand(quote.symbol) }}>
+            <span>{quote.name || quote.symbol}</span>
+            <strong>{formatNumber(quote.price)}</strong>
+            <em className={quote.changePercent && quote.changePercent >= 0 ? 'up' : 'down'}>
+              {quote.changePercent == null ? '데이터 없음' : `${quote.changePercent.toFixed(2)}%`}
+            </em>
+          </button>
+        ))}
+        {!overview && <span className="strip-loading">시장 데이터 로딩 중...</span>}
+      </section>
+
+      <nav className="tab-row">
+        {tabs.map((tab) => (
+          <button key={tab.id} className={activeTab === tab.id ? 'active' : ''} type="button" onClick={() => setActiveTab(tab.id)}>
+            {tab.label}
+          </button>
+        ))}
+        <button className="save-layout" type="button" onClick={saveVisibleLayout}>
+          <Save size={13} /> 레이아웃 저장
+        </button>
+      </nav>
+
+      <main
+        ref={shellRef}
+        className="terminal-shell"
+        style={{
+          gridTemplateColumns: `${layout.panels.left}px 7px minmax(0, 1fr) 7px ${layout.panels.right}px`,
+        }}
+      >
+        <Column
+          id="left"
+          layout={layout}
+          activeTab={activeTab}
+          dragWidget={dragWidget}
+          setDragWidget={setDragWidget}
+          reorderWidget={reorderWidget}
+          onWidgetHeight={onWidgetHeight}
+          renderWidget={renderWidget}
+        />
+        <button className="splitter" type="button" onPointerDown={() => setDragPanel('left')} aria-label="왼쪽 패널 폭 조절">
+          <GripVertical size={14} />
+        </button>
+        <Column
+          id="center"
+          layout={layout}
+          activeTab={activeTab}
+          dragWidget={dragWidget}
+          setDragWidget={setDragWidget}
+          reorderWidget={reorderWidget}
+          onWidgetHeight={onWidgetHeight}
+          renderWidget={renderWidget}
+        />
+        <button className="splitter" type="button" onPointerDown={() => setDragPanel('right')} aria-label="오른쪽 패널 폭 조절">
+          <GripVertical size={14} />
+        </button>
+        <Column
+          id="right"
+          layout={layout}
+          activeTab={activeTab}
+          dragWidget={dragWidget}
+          setDragWidget={setDragWidget}
+          reorderWidget={reorderWidget}
+          onWidgetHeight={onWidgetHeight}
+          renderWidget={renderWidget}
+        />
+      </main>
+
+      {portfolioFocus && <PortfolioModal portfolio={portfolio} onClose={() => setPortfolioFocus(false)} />}
+    </div>
+  )
+}
+
+function Column(props: {
+  id: ColumnId
+  layout: LayoutState
+  activeTab: TabId
+  dragWidget: string | null
+  setDragWidget: (id: string | null) => void
+  reorderWidget: (targetColumn: ColumnId, targetId?: string) => void
+  onWidgetHeight: (id: string, height: number) => void
+  renderWidget: (id: string) => ReactNode
+}) {
+  const widgets = props.layout.tabs[props.activeTab][props.id]
+  return (
+    <section className={`terminal-column ${props.id}`} onDragOver={(event) => event.preventDefault()} onDrop={() => props.reorderWidget(props.id)}>
+      {widgets.map((id) => (
+        <WidgetShell
+          key={id}
+          id={id}
+          title={widgetTitles[id]?.title || id}
+          icon={widgetTitles[id]?.icon}
+          height={props.layout.widgetHeights[id]}
+          setDragWidget={props.setDragWidget}
+          onDrop={() => props.reorderWidget(props.id, id)}
+          onHeight={props.onWidgetHeight}
+        >
+          {props.renderWidget(id)}
+        </WidgetShell>
+      ))}
+    </section>
+  )
+}
+
+function WidgetShell(props: {
+  id: string
+  title: string
+  icon?: ReactNode
+  height?: number
+  children: ReactNode
+  setDragWidget: (id: string | null) => void
+  onDrop: () => void
+  onHeight: (id: string, height: number) => void
+}) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!ref.current || !('ResizeObserver' in window)) return
+    const observer = new ResizeObserver((entries) => {
+      const height = entries[0]?.contentRect.height
+      if (height) props.onHeight(props.id, height)
+    })
+    observer.observe(ref.current)
+    return () => observer.disconnect()
+  }, [props])
+  return (
+    <article
+      ref={ref}
+      className="widget"
+      style={{ height: props.height ? `${props.height}px` : undefined }}
+      draggable
+      onDragStart={() => props.setDragWidget(props.id)}
+      onDragEnd={() => props.setDragWidget(null)}
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={(event) => {
+        event.stopPropagation()
+        props.onDrop()
+      }}
+    >
+      <header className="widget-head">
+        <span className="widget-title">
+          {props.icon}
+          {props.title}
+        </span>
+        <span className="drag-hint">
+          <GripVertical size={13} />
+        </span>
+      </header>
+      <div className="widget-body">{props.children}</div>
+    </article>
+  )
+}
+
+function MarketPulse({ overview }: any) {
+  const breadth = overview?.breadth
+  const total = (breadth?.advancers || 0) + (breadth?.decliners || 0) + (breadth?.unchangedOrMissing || 0)
+  const riskOn = total ? Math.round(((breadth.advancers || 0) / total) * 100) : null
+  return (
+    <div className="pulse">
+      <div className="gauge">
+        <div className="gauge-arc" style={{ ['--value' as any]: `${riskOn ?? 0}%` }} />
+        <strong>{riskOn == null ? '--' : riskOn}</strong>
+        <span>RISK</span>
+      </div>
+      <div className="metric-list">
+        <Metric label="ADV" value={breadth?.advancers ?? '데이터 없음'} />
+        <Metric label="DEC" value={breadth?.decliners ?? '데이터 없음'} />
+        <Metric label="AVG" value={riskOn == null ? '데이터 없음' : `${riskOn}%`} tone={riskOn && riskOn >= 50 ? 'up' : 'down'} />
+      </div>
+      <StatusBadge status={overview ? 'delayed' : 'loading'} message={overview ? '공개 지연 데이터' : '로딩'} />
+    </div>
+  )
+}
+
+function FavoritesPanel({ favorites, favQuotes, toggleFavorite, setSelectedSymbol, setCommand, setActiveTab }: any) {
+  const favs: Array<{ symbol: string; name?: string }> = favorites || []
+  const quoteMap = new Map<string, Quote>((favQuotes || []).map((q: Quote) => [q.symbol, q]))
+  if (!favs.length) {
+    return <EmptyState text="별(★)을 눌러 관심종목을 추가하세요" />
+  }
+  return (
+    <div className="table compact">
+      <div className="table-row head">
+        <span>종목</span>
+        <span>현재가</span>
+        <span>CHG%</span>
+      </div>
+      {favs.map((fav) => {
+        const quote = quoteMap.get(fav.symbol)
+        const label = fav.name || quote?.name || fav.symbol
+        return (
+          <div className="row-with-fav" key={fav.symbol}>
+            <button
+              className="table-row click"
+              type="button"
+              onClick={() => {
+                setSelectedSymbol(fav.symbol)
+                setCommand(fav.symbol)
+                setActiveTab('chart')
+              }}
+            >
+              <span>
+                <strong>{label}</strong>
+                {label !== fav.symbol ? <small>{fav.symbol}</small> : null}
+              </span>
+              <span>{formatNumber(quote?.price)}</span>
+              <span className={quote?.changePercent != null && quote.changePercent >= 0 ? 'up' : 'down'}>
+                {quote?.changePercent == null ? '--' : quote.changePercent.toFixed(2)}
+              </span>
+            </button>
+            <button
+              className="fav-star on"
+              type="button"
+              title="관심종목 해제"
+              onClick={() => toggleFavorite(fav.symbol, fav.name)}
+            >
+              <Star size={13} fill="currentColor" />
+            </button>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function WatchGrid({ overview, setSelectedSymbol, setCommand }: any) {
+  const quotes: Quote[] = overview?.quotes || []
+  return (
+    <div className="table compact">
+      <div className="table-row head">
+        <span>TICKER</span>
+        <span>LAST</span>
+        <span>CHG%</span>
+      </div>
+      {quotes.slice(0, 14).map((quote) => (
+        <button
+          className="table-row click"
+          type="button"
+          key={quote.symbol}
+          onClick={() => {
+            setSelectedSymbol(quote.symbol)
+            setCommand(quote.symbol)
+          }}
+        >
+          <span>{quote.symbol}</span>
+          <span>{formatNumber(quote.price)}</span>
+          <span className={quote.changePercent && quote.changePercent >= 0 ? 'up' : 'down'}>
+            {quote.changePercent == null ? '--' : quote.changePercent.toFixed(2)}
+          </span>
+        </button>
+      ))}
+      {!quotes.length && <EmptyState text="시장 데이터 로딩 중" />}
+    </div>
+  )
+}
+
+function KoreaUniversePanel({
+  koreaUniverse,
+  koreaMarket,
+  koreaQuery,
+  setKoreaMarket,
+  setKoreaQuery,
+  loadKoreaUniverse,
+  setSelectedSymbol,
+  setCommand,
+  setActiveTab,
+  favorites,
+  toggleFavorite,
+}: any) {
+  const items: KoreaUniverseItem[] = koreaUniverse?.items || []
+  const favSet = new Set<string>((favorites || []).map((f: { symbol: string }) => f.symbol))
+  const statusMessage =
+    koreaUniverse.status === 'loading'
+      ? '목록 로딩'
+      : koreaUniverse.sourceMode === 'naver'
+        ? '전체 목록'
+        : koreaUniverse.sourceMode === 'snapshot'
+          ? '스냅샷'
+          : koreaUniverse.message
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    void loadKoreaUniverse(koreaMarket, koreaQuery)
+  }
+  const switchMarket = (market: 'KOSPI' | 'KOSDAQ') => {
+    setKoreaQuery('')
+    setKoreaMarket(market)
+  }
+  return (
+    <div className="universe-panel">
+      <div className="universe-toolbar">
+        <div className="side-toggle">
+          {(['KOSPI', 'KOSDAQ'] as const).map((market) => (
+            <button key={market} type="button" className={koreaMarket === market ? 'active' : ''} onClick={() => switchMarket(market)}>
+              {market}
+            </button>
+          ))}
+        </div>
+        <StatusBadge status={koreaUniverse.status} message={statusMessage} />
+      </div>
+      <form className="universe-search" onSubmit={submit}>
+        <Search size={13} />
+        <input value={koreaQuery} onChange={(event) => setKoreaQuery(event.target.value)} placeholder="종목명/코드 검색" />
+        <button type="submit">검색</button>
+      </form>
+      <div className="table compact universe-table">
+        <div className="table-row head">
+          <span>종목</span>
+          <span>현재가</span>
+          <span>PER/ROE</span>
+        </div>
+        {items.map((item) => (
+          <div className="row-with-fav" key={`${item.market}-${item.code}`}>
+            <button
+              className="table-row click universe-row"
+              type="button"
+              onClick={() => {
+                setSelectedSymbol(item.symbol)
+                setCommand(item.symbol)
+                setActiveTab('chart')
+              }}
+            >
+              <span>
+                <strong>{item.name}</strong>
+                <small>{item.code} · {item.market}</small>
+              </span>
+              <span>
+                {formatNumber(item.price)}
+                <em className={item.changePercent != null && item.changePercent >= 0 ? 'up' : 'down'}>
+                  {item.changePercent == null ? '데이터 없음' : `${item.changePercent.toFixed(2)}%`}
+                </em>
+              </span>
+              <span>
+                <small>PER {formatNumber(item.per)}</small>
+                <small>ROE {formatNumber(item.roe)}</small>
+              </span>
+            </button>
+            <button
+              className={`fav-star ${favSet.has(item.symbol) ? 'on' : ''}`}
+              type="button"
+              title={favSet.has(item.symbol) ? '관심종목 해제' : '관심종목 추가'}
+              onClick={() => toggleFavorite(item.symbol, item.name)}
+            >
+              <Star size={13} fill={favSet.has(item.symbol) ? 'currentColor' : 'none'} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="universe-meta">
+        <span>{koreaUniverse.sourceMode === 'naver' ? '전체 공개 페이지' : '후보 스냅샷'}</span>
+        <span>{koreaUniverse.total == null ? '총계 확인 중' : `${formatNumber(koreaUniverse.total)}개 중 ${formatNumber(koreaUniverse.count)}개 표시`}</span>
+        <span>{koreaUniverse.asOf || '시점 없음'}</span>
+      </div>
+      {!items.length && <EmptyState text="조건에 맞는 한국 종목 없음" />}
+      <p className="guard-copy">
+        네이버 공개 페이지 또는 로컬 스냅샷입니다. 정식 실시간 KRX/증권사 데이터 계약이 아니면 `지연 데이터`로 표시합니다.
+      </p>
+    </div>
+  )
+}
+
+function SectorMap({ overview }: any) {
+  const quotes: Quote[] = overview?.quotes || []
+  const groups = [
+    { name: 'US 지수', symbols: ['^GSPC', '^IXIC', '^DJI'] },
+    { name: '금리/FX', symbols: ['^TNX', 'KRW=X'] },
+    { name: '원자재', symbols: ['CL=F', 'GC=F'] },
+    { name: '한국', symbols: ['005930.KS', '000660.KS'] },
+    { name: 'ETF', symbols: ['SPY', 'QQQ'] },
+    { name: 'Crypto', symbols: ['BTC-USD'] },
+  ]
+  return (
+    <div className="heat-grid">
+      {groups.map((group) => {
+        const values = quotes.filter((q) => group.symbols.includes(q.symbol)).map((q) => q.changePercent).filter((v): v is number => v != null)
+        const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null
+        return (
+          <div key={group.name} className={`heat-cell ${avg == null ? 'empty' : avg >= 0 ? 'pos' : 'neg'}`}>
+            <span>{group.name}</span>
+            <strong>{avg == null ? '데이터 없음' : `${avg.toFixed(2)}%`}</strong>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function FlowRadar({ overview }: any) {
+  const quotes: Quote[] = overview?.quotes || []
+  const avg = (symbols: string[]) => {
+    const values = quotes
+      .filter((q) => symbols.includes(q.symbol))
+      .map((q) => q.changePercent)
+      .filter((v): v is number => v != null)
+    return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null
+  }
+  const rows: Array<{ name: string; value: number | null }> = [
+    { name: '주식', value: avg(['^GSPC', '^IXIC', '^DJI']) },
+    { name: '금리', value: avg(['^TNX']) },
+    { name: '환율', value: avg(['KRW=X']) },
+    { name: '원자재', value: avg(['CL=F', 'GC=F']) },
+    { name: '코인', value: avg(['BTC-USD']) },
+  ]
+  return (
+    <div className="flow-list">
+      {rows.map((row) => {
+        const tone = row.value == null ? '' : row.value >= 0 ? 'up' : 'down'
+        const width = row.value == null ? 0 : Math.min(100, Math.abs(row.value) * 18)
+        return (
+          <div className="flow-row" key={row.name}>
+            <span>{row.name}</span>
+            <div className="flow-bar">
+              <i className={tone} style={{ width: `${width}%` }}></i>
+            </div>
+            <em className={`flow-val ${tone}`}>
+              {row.value == null ? '데이터 없음' : `${row.value >= 0 ? '+' : ''}${row.value.toFixed(2)}%`}
+            </em>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function SymbolHeader({ selectedSymbol, selectedQuote, chart, favorites, toggleFavorite }: any) {
+  const latest = selectedQuote || {}
+  const lastPoint = lastRealPoint(chart?.points || [])
+  const isFav = (favorites || []).some((f: { symbol: string }) => f.symbol === selectedSymbol)
+  return (
+    <div className="snapshot">
+      <div className="snapshot-cell symbol-cell">
+        <button
+          className={`fav-star ${isFav ? 'on' : ''}`}
+          type="button"
+          title={isFav ? '관심종목 해제' : '관심종목 추가'}
+          onClick={() => toggleFavorite(selectedSymbol, latest.name)}
+        >
+          <Star size={14} fill={isFav ? 'currentColor' : 'none'} />
+        </button>
+        <SnapshotCell label="SYMBOL" value={selectedSymbol} sub={latest.name && latest.name !== selectedSymbol ? latest.name : ''} />
+      </div>
+      <SnapshotCell label="LAST" value={formatNumber(latest.price ?? lastPoint?.close)} sub={latest.message || chart?.message} tone={latest.changePercent >= 0 ? 'up' : 'down'} />
+      <SnapshotCell label="OPEN" value={formatNumber(lastPoint?.open)} sub="chart" />
+      <SnapshotCell label="HIGH" value={formatNumber(lastPoint?.high)} sub="range" />
+      <SnapshotCell label="LOW" value={formatNumber(lastPoint?.low)} sub="range" />
+      <SnapshotCell label="VOLUME" value={formatNumber(lastPoint?.volume)} sub={chart?.source || ''} />
+    </div>
+  )
+}
+
+function ChartPanel({ chart, period, interval, setPeriod, setInterval, reload }: any) {
+  return (
+    <div className="chart-panel">
+      <div className="toolbar">
+        <span className="spacer"></span>
+        <Segmented values={['1M', '3M', '6M', '1Y', '2Y', '5Y', '10Y']} value={period} onChange={setPeriod} />
+        <Segmented values={['1D', '1W', '1M']} value={interval} onChange={setInterval} />
+        <button className="icon-button" type="button" onClick={reload} title="새로고침">
+          <RefreshCw size={14} />
+        </button>
+      </div>
+      <TradingChart points={chart.points || []} />
+      <div className="chart-footer">
+        <StatusBadge status={chart.status} message={chart.message} />
+        <span>{chart.source || 'source 없음'}</span>
+        <span>{chart.period}/{chart.interval}</span>
+      </div>
+    </div>
+  )
+}
+
+function RiskEngine({ chart, selectedQuote }: any) {
+  const points: ChartPoint[] = chart.points || []
+  const last = lastRealPoint(points)
+  return (
+    <div className="risk-grid">
+      <Metric label="LAST" value={formatNumber(selectedQuote?.price || last?.close)} tone={selectedQuote?.changePercent >= 0 ? 'up' : 'down'} />
+      <Metric label="SMA20" value={formatNumber(last?.sma20)} />
+      <Metric label="SMA50" value={formatNumber(last?.sma50)} />
+      <Metric label="RSI14" value={formatNumber(last?.rsi14)} tone={last?.rsi14 && last.rsi14 > 70 ? 'down' : 'up'} />
+      <Metric label="MACD" value={formatNumber(last?.macd)} />
+      <Metric label="SIGNAL" value={formatNumber(last?.macdSignal)} />
+    </div>
+  )
+}
+
+function relativeTime(value: string) {
+  if (!value) return ''
+  const time = Date.parse(value)
+  if (Number.isNaN(time)) return ''
+  const minutes = Math.floor((Date.now() - time) / 60000)
+  if (minutes < 1) return '방금'
+  if (minutes < 60) return `${minutes}분 전`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}시간 전`
+  return `${Math.floor(hours / 24)}일 전`
+}
+
+function NewsPanel({ news }: any) {
+  return (
+    <div className="news-list">
+      <StatusBadge status={news.status} message={news.message || '뉴스'} />
+      {(news.items || []).map((item: NewsItem) => (
+        <a key={item.url || item.title} className="news-item" href={item.url} target="_blank" rel="noreferrer">
+          <span className="news-meta">
+            <b className={item.sentiment?.label === '긍정' ? 'up' : item.sentiment?.label === '부정' ? 'down' : ''}>
+              {item.sentiment?.label || '중립'}
+            </b>
+            <span>{item.importance}</span>
+            {item.source ? <span>{item.source}</span> : null}
+            {item.publishedAt ? <span>{relativeTime(item.publishedAt)}</span> : null}
+            {item.translationStatus === 'gemini' ? <span className="ai-tag">AI번역</span> : null}
+          </span>
+          <strong>{item.translatedTitle || item.title}</strong>
+          {item.translatedTitle && item.translatedTitle !== item.title ? <small>{item.title}</small> : null}
+          <p>{item.koreanSummary || item.summary}</p>
+          <em>{item.relatedTickers?.join(' ')}</em>
+        </a>
+      ))}
+      {!news.items?.length && <EmptyState text="뉴스 데이터 없음" />}
+    </div>
+  )
+}
+
+function OrderPanel({ selectedSymbol, token, authHeaders }: any) {
+  const [side, setSide] = useState('buy')
+  const [quantity, setQuantity] = useState('1')
+  const [limit, setLimit] = useState('')
+  const [result, setResult] = useState<any>(null)
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!token) {
+      setResult({ status: 'login_required', message: '로그인 후 모의 주문 가능' })
+      return
+    }
+    const payload = {
+      symbol: selectedSymbol,
+      side,
+      quantity: Number(quantity),
+      order_type: limit ? 'limit' : 'market',
+      limit_price: limit ? Number(limit) : null,
+    }
+    try {
+      const data = await apiFetch('/api/orders/paper', {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      setResult(data)
+    } catch (error: any) {
+      setResult({ status: 'error', message: error.message })
+    }
+  }
+  return (
+    <form className="order-form" onSubmit={submit}>
+      <div className="mode-banner paper">PAPER TRADING ONLY</div>
+      <label>종목<input value={selectedSymbol} readOnly /></label>
+      <div className="side-toggle">
+        <button type="button" className={side === 'buy' ? 'active buy' : ''} onClick={() => setSide('buy')}>Buy</button>
+        <button type="button" className={side === 'sell' ? 'active sell' : ''} onClick={() => setSide('sell')}>Sell</button>
+      </div>
+      <label>수량<input value={quantity} onChange={(event) => setQuantity(event.target.value)} inputMode="decimal" /></label>
+      <label>지정가<input value={limit} onChange={(event) => setLimit(event.target.value)} placeholder="비우면 시장가 모의주문" inputMode="decimal" /></label>
+      <button className="primary" type="submit">모의 주문 보내기</button>
+      <p className="guard-copy">실제 주문은 설정에서 LIVE_TRADING_ENABLED와 브로커 어댑터가 모두 켜진 경우에만 별도 경로로 동작합니다.</p>
+      {result && <StatusBadge status={result.status === 'accepted_paper' ? 'ok' : 'error'} message={result.message || result.status} />}
+    </form>
+  )
+}
+
+function FilingsPanel({ sec, dart }: any) {
+  return (
+    <div className="filings">
+      <h4>SEC EDGAR</h4>
+      <StatusBadge status={sec.status} message={sec.message} />
+      {(sec.items || []).slice(0, 6).map((item: any) => (
+        <a key={`${item.form}-${item.filingDate}-${item.url}`} href={item.url} target="_blank" rel="noreferrer">
+          <strong>{item.form}</strong>
+          <span>{item.filingDate}</span>
+        </a>
+      ))}
+      <h4>DART</h4>
+      <StatusBadge status={dart.status} message={dart.message} />
+      {(dart.items || []).slice(0, 6).map((item: any) => (
+        <a key={item.receiptNo} href={item.url} target="_blank" rel="noreferrer">
+          <strong>{item.reportName}</strong>
+          <span>{item.date}</span>
+        </a>
+      ))}
+    </div>
+  )
+}
+
+function EarningsPanel({ selectedSymbol }: any) {
+  const [data, setData] = useState<any>(null)
+  useEffect(() => {
+    let cancelled = false
+    setData(null)
+    void apiFetch(`/api/market/calendar?symbol=${encodeURIComponent(selectedSymbol)}`)
+      .then((res) => {
+        if (!cancelled) setData(res)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [selectedSymbol])
+  const fmtDate = (value?: string) => {
+    if (!value) return '데이터 없음'
+    const time = Date.parse(value)
+    return Number.isNaN(time) ? value : new Date(time).toLocaleDateString('ko-KR')
+  }
+  return (
+    <div className="plain-list">
+      <Metric label="종목" value={selectedSymbol} />
+      <Metric label="다음 실적발표" value={fmtDate(data?.earningsDate)} />
+      <Metric label="배당수익률" value={data?.dividendYield != null ? `${data.dividendYield}%` : '해당 없음'} />
+      <Metric label="배당락일" value={fmtDate(data?.exDividendDate)} />
+      <Metric label="EPS(TTM)" value={formatNumber(data?.trailingEps)} />
+      <Metric label="선행 PER" value={formatNumber(data?.forwardPE)} />
+      <p>{data ? `${data.source || 'yfinance'} 지연 데이터` : '실적/배당 로딩 중…'}</p>
+    </div>
+  )
+}
+
+function AiPanel({ runAi, aiResult, health }: any) {
+  return (
+    <div className="ai-panel">
+      <div className="mode-banner">{health?.geminiConfigured ? 'GEMINI CONNECTED' : 'LOCAL RULE SUMMARY'}</div>
+      <button className="primary" type="button" onClick={runAi}>현재 화면으로 한국어 분석</button>
+      <pre>{aiResult?.summary || 'AI 버튼을 누르면 종목, 차트, 뉴스, 공시, 포트폴리오 상태를 함께 요약합니다. API 키가 없으면 로컬 규칙 기반 요약으로 작동합니다.'}</pre>
+      {aiResult?.riskNotes?.map((note: string) => <small key={note}>{note}</small>)}
+    </div>
+  )
+}
+
+function MonitorGrid({ overview }: any) {
+  const quotes: Quote[] = overview?.quotes || []
+  return (
+    <div className="monitor-grid">
+      {quotes.map((quote) => (
+        <div className="monitor-cell" key={quote.symbol}>
+          <span>{quote.name || quote.symbol}</span>
+          <strong>{formatNumber(quote.price)}</strong>
+          <em className={quote.changePercent && quote.changePercent >= 0 ? 'up' : 'down'}>
+            {quote.changePercent == null ? '데이터 없음' : `${quote.changePercent.toFixed(2)}%`}
+          </em>
+          <StatusBadge status={quote.status} message={quote.message} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function DataStatus({ health }: any) {
+  const rows = [
+    ['미국 주식/ETF/지수/원자재/FX', 'yfinance 공개 지연 데이터', 'delayed'],
+    ['한국 종목 유니버스', '네이버 공개 페이지, 실패 시 스냅샷 fallback', 'delayed'],
+    ['SEC EDGAR', '공개 API, User-Agent 필요', 'delayed'],
+    ['DART', health?.dartConfigured ? 'API 키 설정됨' : 'DART_API_KEY 필요', health?.dartConfigured ? 'ok' : 'api_required'],
+    ['Gemini', health?.geminiConfigured ? 'API 키 설정됨' : '선택 연결', health?.geminiConfigured ? 'ok' : 'api_required'],
+    ['실거래', health?.liveTradingEnabled ? '서버 플래그 켜짐' : '기본 비활성', health?.liveTradingEnabled ? 'ok' : 'not_available'],
+  ]
+  return (
+    <div className="plain-list">
+      {rows.map(([name, msg, status]) => (
+        <div className="status-row" key={name}>
+          <span>{name}</span>
+          <StatusBadge status={status as Status} message={msg} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ChartControls({ period, interval, setPeriod, setInterval, selectedSymbol }: any) {
+  return (
+    <div className="plain-list">
+      <Metric label="현재 종목" value={selectedSymbol} />
+      <span>기간</span>
+      <Segmented values={['1M', '3M', '6M', '1Y', '2Y', '5Y', '10Y']} value={period} onChange={setPeriod} />
+      <span>인터벌</span>
+      <Segmented values={['1D', '1W', '1M']} value={interval} onChange={setInterval} />
+      <p>기간과 인터벌 변경 시 `/api/market/chart`를 다시 호출합니다.</p>
+    </div>
+  )
+}
+
+function IndicatorStack({ chart }: any) {
+  const points: ChartPoint[] = chart.points || []
+  return (
+    <div className="indicator-stack">
+      <MiniSeries points={points} field="rsi14" label="RSI14" min={0} max={100} />
+      <MiniSeries points={points} field="macdHist" label="MACD Histogram" />
+    </div>
+  )
+}
+
+const MARKET_OPTIONS: Record<string, { suffix: string; currency: 'KRW' | 'USD'; market: string; label: string }> = {
+  US: { suffix: '', currency: 'USD', market: 'US', label: '미국' },
+  KOSPI: { suffix: '.KS', currency: 'KRW', market: 'KR', label: '코스피' },
+  KOSDAQ: { suffix: '.KQ', currency: 'KRW', market: 'KR', label: '코스닥' },
+}
+
+function PortfolioControls({ token, authHeaders, loadPortfolio, portfolio }: any) {
+  const [symbol, setSymbol] = useState('AAPL')
+  const [quantity, setQuantity] = useState('1')
+  const [averageCost, setAverageCost] = useState('')
+  const [marketKey, setMarketKey] = useState<'US' | 'KOSPI' | 'KOSDAQ'>('US')
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
+  // #2 회사명 검색 자동완성
+  const [results, setResults] = useState<Array<{ symbol: string; name: string; exchange: string; type: string }>>([])
+  const [searchOpen, setSearchOpen] = useState(false)
+  // #3 보유 종목 inline 수정
+  const [editId, setEditId] = useState<number | null>(null)
+  const [editQty, setEditQty] = useState('')
+  const [editAvg, setEditAvg] = useState('')
+
+  const inferMarket = (sym: string) => {
+    if (sym.endsWith('.KS')) setMarketKey('KOSPI')
+    else if (sym.endsWith('.KQ')) setMarketKey('KOSDAQ')
+    else if (/^\d{6}$/.test(sym)) setMarketKey((prev) => (prev === 'KOSDAQ' ? 'KOSDAQ' : 'KOSPI'))
+    else if (/^[A-Z.]+$/.test(sym) && !sym.includes('.')) setMarketKey('US')
+  }
+
+  // 입력 심볼로 시장 자동 추정 (사용자가 직접 바꾸면 그 선택 유지)
+  const onSymbolChange = (raw: string) => {
+    const next = raw.toUpperCase()
+    setSymbol(next)
+    setSearchOpen(true)
+    inferMarket(next)
+  }
+
+  // 회사명/티커 검색 (디바운스)
+  useEffect(() => {
+    const q = symbol.trim()
+    if (!q || !searchOpen) {
+      setResults([])
+      return
+    }
+    const handle = setTimeout(() => {
+      void apiFetch(`/api/market/search?q=${encodeURIComponent(q)}`)
+        .then((data) => setResults(data.results || []))
+        .catch(() => setResults([]))
+    }, 250)
+    return () => clearTimeout(handle)
+  }, [symbol, searchOpen])
+
+  const pickResult = (sym: string) => {
+    const upper = sym.toUpperCase()
+    setSymbol(upper)
+    inferMarket(upper)
+    setResults([])
+    setSearchOpen(false)
+  }
+
+  const addHolding = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!token) {
+      setMessage('먼저 로그인하세요')
+      return
+    }
+    const cfg = MARKET_OPTIONS[marketKey]
+    let normalized = symbol.trim().toUpperCase()
+    if (!normalized) {
+      setMessage('티커/종목코드를 입력하세요')
+      return
+    }
+    // 6자리 한국 코드면 시장 접미사 자동 부착
+    if (/^\d{6}$/.test(normalized) && cfg.suffix) normalized = `${normalized}${cfg.suffix}`
+    const qty = Number(quantity)
+    const avg = Number(averageCost)
+    if (!qty || qty <= 0) {
+      setMessage('수량을 1 이상으로 입력하세요')
+      return
+    }
+    if (!avg || avg <= 0) {
+      setMessage('평균 매입가를 입력하세요')
+      return
+    }
+    setBusy(true)
+    setSearchOpen(false)
+    setResults([])
+    try {
+      const res = await apiFetch('/api/portfolio/holdings', {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: normalized,
+          quantity: qty,
+          average_cost: avg,
+          currency: cfg.currency,
+          market: cfg.market,
+        }),
+      })
+      setMessage(res?.status === 'merged' ? `${normalized} 기존 보유에 합산됨 (평단 재계산)` : `${normalized} ${qty}주 저장됨`)
+      setQuantity('1')
+      setAverageCost('')
+      await loadPortfolio()
+    } catch (err: any) {
+      setMessage(`저장 실패: ${err?.message || '오류'}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const removeHolding = async (id: number, sym: string) => {
+    try {
+      await apiFetch(`/api/portfolio/holdings/${id}`, { method: 'DELETE', headers: authHeaders })
+      setMessage(`${sym} 삭제됨`)
+      await loadPortfolio()
+    } catch (err: any) {
+      setMessage(`삭제 실패: ${err?.message || '오류'}`)
+    }
+  }
+
+  const startEdit = (h: any) => {
+    setEditId(h.id)
+    setEditQty(String(h.quantity))
+    setEditAvg(String(h.average_cost))
+  }
+
+  const saveEdit = async (h: any) => {
+    const qty = Number(editQty)
+    const avg = Number(editAvg)
+    if (!qty || qty <= 0 || !avg || avg <= 0) {
+      setMessage('수량·평단을 올바르게 입력하세요')
+      return
+    }
+    try {
+      await apiFetch(`/api/portfolio/holdings/${h.id}`, {
+        method: 'PUT',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: h.symbol,
+          name: h.name ?? null,
+          quantity: qty,
+          average_cost: avg,
+          currency: h.currency || 'USD',
+          market: h.market || 'US',
+          sector: h.sector ?? null,
+          country: h.country ?? null,
+          target_weight: h.target_weight ?? null,
+        }),
+      })
+      setMessage(`${h.symbol} 수정됨`)
+      setEditId(null)
+      await loadPortfolio()
+    } catch (err: any) {
+      setMessage(`수정 실패: ${err?.message || '오류'}`)
+    }
+  }
+
+  const cfg = MARKET_OPTIONS[marketKey]
+  const holdings: any[] = portfolio?.holdings || []
+
+  return (
+    <div className="portfolio-controls">
+      <form onSubmit={addHolding} className="holding-form">
+        <label>시장
+          <select value={marketKey} onChange={(event) => setMarketKey(event.target.value as any)}>
+            <option value="US">미국 (USD)</option>
+            <option value="KOSPI">코스피 (KRW)</option>
+            <option value="KOSDAQ">코스닥 (KRW)</option>
+          </select>
+        </label>
+        <label>종목 검색 (회사명·티커)
+          <div className="pf-search">
+            <input
+              value={symbol}
+              onChange={(event) => onSymbolChange(event.target.value)}
+              onFocus={() => setSearchOpen(true)}
+              placeholder="예: 삼성전자, 애플, AAPL"
+              autoComplete="off"
+            />
+            {searchOpen && results.length > 0 && (
+              <div className="pf-search-drop">
+                {results.slice(0, 8).map((r) => (
+                  <button type="button" key={`${r.symbol}-${r.exchange}`} onClick={() => pickResult(r.symbol)}>
+                    <strong>{r.symbol}</strong>
+                    <span>{r.name}</span>
+                    <em>{quoteTypeLabel(r.type)}</em>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </label>
+        <label>수량 (주)
+          <input value={quantity} onChange={(event) => setQuantity(event.target.value)} inputMode="decimal" placeholder="보유 주식 수" />
+        </label>
+        <label>평균 매입가 ({cfg.currency})
+          <input value={averageCost} onChange={(event) => setAverageCost(event.target.value)} inputMode="decimal" placeholder="1주당 산 가격" />
+        </label>
+        <button className="primary" type="submit" disabled={busy}>{busy ? '저장 중…' : '보유 종목 추가'}</button>
+        <small className="form-help">평균 매입가 = 그 종목을 1주당 평균 얼마에 샀는지. 모르면 매수 화면의 ‘평단가’를 입력하세요.</small>
+      </form>
+      {holdings.length > 0 && (
+        <div className="holding-edit">
+          <div className="holding-edit-head">보유 종목 ({holdings.length}) · 수량/평단 클릭 수정</div>
+          {holdings.map((h) =>
+            editId === h.id ? (
+              <div className="holding-edit-row editing" key={h.id}>
+                <span className="he-sym">{h.symbol}</span>
+                <input className="he-input" value={editQty} onChange={(e) => setEditQty(e.target.value)} inputMode="decimal" title="수량" />
+                <input className="he-input" value={editAvg} onChange={(e) => setEditAvg(e.target.value)} inputMode="decimal" title="평단" />
+                <button type="button" className="he-ok" title="저장" onClick={() => saveEdit(h)}><Check size={12} /></button>
+                <button type="button" className="he-cancel" title="취소" onClick={() => setEditId(null)}><X size={12} /></button>
+              </div>
+            ) : (
+              <div className="holding-edit-row" key={h.id}>
+                <span className="he-sym">{h.symbol}</span>
+                <span className="he-qty">{formatNumber(h.quantity)}주 · 평단 {formatNumber(h.average_cost)}</span>
+                <button type="button" className="he-edit" title="수정" onClick={() => startEdit(h)}><Pencil size={12} /></button>
+                <button type="button" className="he-del" title="삭제" onClick={() => removeHolding(h.id, h.symbol)}><Trash2 size={12} /></button>
+              </div>
+            ),
+          )}
+        </div>
+      )}
+      {message && <small className="form-msg">{message}</small>}
+    </div>
+  )
+}
+
+function PortfolioPanel({ portfolio, setPortfolioFocus }: any) {
+  if (!portfolio) {
+    return <EmptyState text="로그인하면 포트폴리오 비중·수익률을 한눈에 볼 수 있어요. 왼쪽에서 시작하세요." />
+  }
+  const holdings: any[] = portfolio.holdings || []
+  if (!holdings.length) {
+    return <EmptyState text="아직 보유 종목이 없어요. 왼쪽 ‘보유 종목 추가’로 첫 종목을 넣어보세요." />
+  }
+  const base = portfolio.baseCurrency || 'KRW'
+  const totals = portfolio.totals || {}
+  const up = (totals.pnl ?? 0) >= 0
+  // 종목별 비중 — 수동 입력엔 섹터가 없으므로 주린이에게 가장 직관적인 ‘내 돈이 어느 종목에’를 보여줌
+  const byHolding = holdings
+    .filter((h) => h.weight != null)
+    .map((h) => ({ name: h.symbol as string, weight: h.weight as number, value: (h.marketValueBase ?? 0) as number }))
+  return (
+    <div className="portfolio-panel">
+      <div className="portfolio-head">
+        <Metric label="투자 원금" value={formatMoney(totals.cost, base)} />
+        <Metric label="총 평가금액" value={formatMoney(totals.marketValue, base)} />
+        <Metric label="총 손익" value={formatMoney(totals.pnl, base)} tone={up ? 'up' : 'down'} />
+        <Metric label="총 수익률" value={totals.pnlPercent == null ? '데이터 없음' : formatPercent(totals.pnlPercent)} tone={up ? 'up' : 'down'} />
+        <button className="icon-button" type="button" title="크게 보기" onClick={() => setPortfolioFocus(true)}><Maximize2 size={14} /></button>
+      </div>
+      <div className="pf-note">
+        원화 환산 기준
+        {portfolio.fxRate ? ` · USD/KRW ${formatNumber(portfolio.fxRate)}` : ' · 환율 조회 실패'}
+      </div>
+      <div className="pf-alloc-wrap">
+        <DonutChart data={byHolding} title="종목별 비중" />
+        <AllocationBars data={byHolding} />
+      </div>
+      <div className="table holdings-table">
+        <div className="table-row head">
+          <span>종목</span><span>보유</span><span>평단</span><span>현재가</span><span>수익률</span><span>비중</span>
+        </div>
+        {holdings.map((h: any) => {
+          const cur = (h.currency || base).toUpperCase()
+          const gain = (h.pnlPercent ?? 0) >= 0
+          return (
+            <div className="table-row" key={h.id}>
+              <span className="h-sym" title={h.name || h.symbol}>{h.symbol}</span>
+              <span>{formatNumber(h.quantity)}</span>
+              <span>{formatMoney(h.average_cost, cur)}</span>
+              <span>{h.currentPrice == null ? '–' : formatMoney(h.currentPrice, cur)}</span>
+              <span className={gain ? 'up' : 'down'}>{h.pnlPercent == null ? '–' : formatPercent(h.pnlPercent)}</span>
+              <span className="h-weight">{h.weight == null ? '–' : `${h.weight}%`}</span>
+            </div>
+          )
+        })}
+      </div>
+      <StatusBadge status={portfolio.status} message={portfolio.message} />
+    </div>
+  )
+}
+
+function DonutChart({ data, title }: { data: Array<{ name: string; weight: number; value: number }>; title?: string }) {
+  const rows = (data || []).filter((d) => d.weight > 0)
+  if (!rows.length) return null
+  const palette = ['#4f8cff', '#36c2a8', '#f6c244', '#ef6f6c', '#a98bff', '#5fb0e6', '#8bd17c', '#e6845f', '#c77dff', '#6ad0c0']
+  const radius = 52
+  const circ = 2 * Math.PI * radius
+  const segments = rows.map((row, i) => {
+    const frac = Math.min(1, Math.max(0, row.weight / 100))
+    const len = frac * circ
+    // cumulative offset of all prior segments (no mutation during render)
+    const prior = rows.slice(0, i).reduce((sum, r) => sum + Math.min(1, Math.max(0, r.weight / 100)) * circ, 0)
+    return { color: palette[i % palette.length], dash: len, gap: circ - len, off: -prior, name: row.name, weight: row.weight }
+  })
+  const top = rows[0]
+  return (
+    <div className="donut">
+      <svg viewBox="0 0 140 140" width="120" height="120">
+        <g transform="translate(70,70) rotate(-90)">
+          <circle r={radius} fill="none" stroke="#1c2230" strokeWidth="16" />
+          {segments.map((s) => (
+            <circle
+              key={s.name}
+              r={radius}
+              fill="none"
+              stroke={s.color}
+              strokeWidth="16"
+              strokeDasharray={`${s.dash} ${s.gap}`}
+              strokeDashoffset={s.off}
+            />
+          ))}
+        </g>
+        <text x="70" y="66" textAnchor="middle" className="donut-center">{top?.name}</text>
+        <text x="70" y="82" textAnchor="middle" className="donut-center-sub">{top?.weight}%</text>
+      </svg>
+      <div className="donut-legend">
+        {title && <strong>{title}</strong>}
+        {segments.slice(0, 6).map((s) => (
+          <div className="donut-leg-row" key={s.name}>
+            <i style={{ background: s.color }}></i>
+            <span>{s.name}</span>
+            <em>{s.weight}%</em>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function PortfolioRisk({ portfolio }: any) {
+  if (!portfolio || !(portfolio.holdings || []).length) return <EmptyState text="보유 종목을 추가하면 집중도·점검 신호가 표시됩니다" />
+  return (
+    <div className="plain-list">
+      <p className="hint">한 종목 비중이 너무 크면(40% 이상) ‘집중도 점검’으로 알려드려요. 분산이 잘 됐는지 확인용입니다.</p>
+      {(portfolio.holdings || []).map((holding: any) => (
+        <div className="status-row" key={holding.id}>
+          <span>{holding.symbol} {holding.weight != null ? `· ${holding.weight}%` : ''}</span>
+          <StatusBadge status={holding.rebalance === '정상' ? 'ok' : 'delayed'} message={holding.rebalance} />
+        </div>
+      ))}
+      {(portfolio.warnings || []).map((warning: string) => <StatusBadge key={warning} status="not_available" message={warning} />)}
+    </div>
+  )
+}
+
+function FxRates({ authHeaders }: any) {
+  const [data, setData] = useState<{ items: any[]; asOf?: string } | null>(null)
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const res = await apiFetch('/api/market/fx', { headers: authHeaders })
+        if (alive) setData(res)
+      } catch {
+        if (alive) setData(null)
+      }
+    }
+    void load()
+    const timer = setInterval(load, 60000)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [authHeaders])
+  if (!data?.items?.length) return <EmptyState text="환율 데이터 없음" />
+  return (
+    <div className="fx-rates">
+      {data.items.map((row) => {
+        const up = (row.changePercent ?? 0) >= 0
+        return (
+          <div className="fx-row" key={row.symbol}>
+            <span className="fx-label">{row.label}<small>{row.korean}</small></span>
+            <span className="fx-price">{row.price == null ? '–' : formatNumber(row.price)}</span>
+            <span className={`fx-chg ${up ? 'up' : 'down'}`}>{row.changePercent == null ? '–' : formatPercent(row.changePercent)}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function OptionsPanel({ options }: any) {
+  const rows = [...(options.calls || []).slice(0, 8), ...(options.puts || []).slice(0, 8)]
+  return (
+    <div className="options-panel">
+      <StatusBadge status={options.status} message={options.message} />
+      <div className="table compact">
+        <div className="table-row head"><span>계약</span><span>행사가</span><span>IV</span></div>
+        {rows.map((row: any) => (
+          <div className="table-row" key={row.contractSymbol}><span>{row.contractSymbol}</span><span>{formatNumber(row.strike)}</span><span>{formatNumber(row.impliedVolatility)}</span></div>
+        ))}
+      </div>
+      {!rows.length && <EmptyState text="옵션 데이터 없음" />}
+    </div>
+  )
+}
+
+function BrokerStatus({ brokers }: any) {
+  return (
+    <div className="broker-list">
+      <div className="mode-banner paper">기본값: Paper Trading</div>
+      {(brokers.providers || []).map((broker: any) => (
+        <div className="broker-card" key={broker.id}>
+          <strong>{broker.name}</strong>
+          <small>{broker.markets?.join(' · ')}</small>
+          <StatusBadge status="api_required" message={broker.requires?.join(', ')} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function PaperPolicy() {
+  return (
+    <div className="plain-list">
+      <StatusBadge status="ok" message="Paper Trading이 기본 경로" />
+      <StatusBadge status="not_available" message="실거래 엔드포인트는 기본 차단" />
+      <StatusBadge status="api_required" message="브로커별 키, 계좌, 사용자 명시 활성화 필요" />
+      <p>모의 주문과 실거래 주문은 API 경로, UI 배지, 서버 플래그를 분리했습니다.</p>
+    </div>
+  )
+}
+
+function PortfolioModal({ portfolio, onClose }: { portfolio: PortfolioSummary | null; onClose: () => void }) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <section className="portfolio-modal" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <strong>포트폴리오 크게 보기</strong>
+          <button type="button" onClick={onClose}>닫기</button>
+        </header>
+        {portfolio ? (
+          <div className="modal-grid">
+            <div className="modal-alloc"><DonutChart data={portfolio.allocations?.sector || []} title="섹터" /><AllocationBars data={portfolio.allocations?.sector || []} large /></div>
+            <div className="modal-alloc"><DonutChart data={portfolio.allocations?.country || []} title="국가" /><AllocationBars data={portfolio.allocations?.country || []} large /></div>
+            <div className="modal-alloc"><DonutChart data={portfolio.allocations?.currency || []} title="통화" /><AllocationBars data={portfolio.allocations?.currency || []} large /></div>
+          </div>
+        ) : (
+          <EmptyState text="포트폴리오 없음" />
+        )}
+      </section>
+    </div>
+  )
+}
+
+function AllocationBars({ data, large = false }: { data: Array<{ name: string; weight: number; value: number }>; large?: boolean }) {
+  if (!data?.length) return <EmptyState text="배분 데이터 없음" />
+  return (
+    <div className={large ? 'alloc large' : 'alloc'}>
+      {data.map((row) => (
+        <div className="alloc-row" key={row.name}>
+          <span>{row.name}</span>
+          <div><i style={{ width: `${Math.max(2, row.weight)}%` }}></i></div>
+          <em>{row.weight}%</em>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function MiniSeries({ points, field, label, min, max }: { points: ChartPoint[]; field: keyof ChartPoint; label: string; min?: number; max?: number }) {
+  const values = points.map((p) => p[field]).filter((v): v is number => typeof v === 'number')
+  if (values.length < 2) return <EmptyState text={`${label} 데이터 없음`} />
+  const low = min ?? Math.min(...values)
+  const high = max ?? Math.max(...values)
+  const path = values
+    .map((v, i) => {
+      const x = 10 + (i / Math.max(values.length - 1, 1)) * 420
+      const y = 90 - ((v - low) / Math.max(high - low, 1)) * 70
+      return `${i === 0 ? 'M' : 'L'} ${x} ${y}`
+    })
+    .join(' ')
+  return (
+    <div className="mini-series">
+      <span>{label}</span>
+      <svg viewBox="0 0 440 110"><path d={path} /></svg>
+    </div>
+  )
+}
+
+function Segmented({ values, value, onChange }: { values: string[]; value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="segmented">
+      {values.map((item) => (
+        <button type="button" key={item} className={item === value ? 'active' : ''} onClick={() => onChange(item)}>
+          {item}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function SnapshotCell({ label, value, sub, tone }: { label: string; value: any; sub?: string; tone?: string }) {
+  return (
+    <div className="snapshot-cell">
+      <span>{label}</span>
+      <strong className={tone}>{value ?? '데이터 없음'}</strong>
+      <small>{sub}</small>
+    </div>
+  )
+}
+
+function Metric({ label, value, tone }: { label: string; value: any; tone?: string }) {
+  return (
+    <div className="metric">
+      <span>{label}</span>
+      <strong className={tone}>{value ?? '데이터 없음'}</strong>
+    </div>
+  )
+}
+
+function StatusBadge({ status, message }: { status: Status | string; message?: string }) {
+  const label: Record<string, string> = {
+    ok: '정상',
+    live: '실시간',
+    delayed: '지연',
+    api_required: 'API 필요',
+    not_available: '데이터 없음',
+    error: '오류',
+    loading: '로딩',
+  }
+  return <span className={`status ${status}`}>{label[status] || status}{message ? ` · ${message}` : ''}</span>
+}
+
+function EmptyState({ text }: { text: string }) {
+  return <div className="empty">{text}</div>
+}
+
+async function apiFetch(path: string, options: RequestInit = {}) {
+  // Auto-attach the bearer token so every gated route is authenticated without
+  // each call site threading auth headers. Explicit headers still win on merge.
+  const token = localStorage.getItem('kft_token') || ''
+  const headers = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...((options.headers as Record<string, string>) || {}),
+  }
+  const response = await fetch(`${API_BASE}${path}`, { ...options, headers })
+  if (!response.ok) {
+    // Mid-session token expiry/revocation: signal the app to re-lock.
+    if (response.status === 401 && !path.startsWith('/api/auth/')) {
+      try {
+        window.dispatchEvent(new Event('kft-unauthorized'))
+      } catch {
+        // ignore (non-browser env)
+      }
+    }
+    let detail = response.statusText
+    try {
+      const data = await response.json()
+      detail = data.detail || detail
+    } catch {
+      detail = response.statusText
+    }
+    throw new Error(detail)
+  }
+  return response.json()
+}
+
+function loadLocalLayout(): LayoutState {
+  const saved = localStorage.getItem('kft_layout')
+  if (!saved) return defaultLayout
+  try {
+    return mergeLayout(JSON.parse(saved))
+  } catch {
+    return defaultLayout
+  }
+}
+
+function mergeLayout(candidate: any): LayoutState {
+  const heights = { ...defaultLayout.widgetHeights, ...(candidate?.widgetHeights || {}) }
+  if ((heights.chart || 0) < 440) heights.chart = defaultLayout.widgetHeights.chart
+  const mergedTabs = { ...defaultLayout.tabs, ...(candidate?.tabs || {}) } as LayoutState['tabs']
+  // Inject the favorites widget into saved layouts that predate it.
+  for (const id of Object.keys(mergedTabs) as TabId[]) {
+    const cols = mergedTabs[id]
+    if (!defaultLayout.tabs[id]?.left.includes('favorites')) continue
+    const present = [...cols.left, ...cols.center, ...cols.right].includes('favorites')
+    if (!present) mergedTabs[id] = { ...cols, left: ['favorites', ...cols.left] }
+  }
+  // Inject the FX widget into saved layouts that predate it.
+  for (const id of Object.keys(mergedTabs) as TabId[]) {
+    const cols = mergedTabs[id]
+    if (!defaultLayout.tabs[id]?.left.includes('fxRates')) continue
+    const present = [...cols.left, ...cols.center, ...cols.right].includes('fxRates')
+    if (present) continue
+    const idx = cols.left.indexOf('favorites')
+    const left = [...cols.left]
+    left.splice(idx >= 0 ? idx + 1 : 0, 0, 'fxRates')
+    mergedTabs[id] = { ...cols, left }
+  }
+  return {
+    panels: { ...defaultLayout.panels, ...(candidate?.panels || {}) },
+    tabs: mergedTabs,
+    widgetHeights: heights,
+  }
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max)
+}
+
+function lastRealPoint(points: ChartPoint[]): ChartPoint | undefined {
+  for (let i = points.length - 1; i >= 0; i -= 1) {
+    if (points[i]?.close != null) return points[i]
+  }
+  return undefined
+}
+
+function quoteTypeLabel(type: string) {
+  const map: Record<string, string> = {
+    EQUITY: '주식',
+    ETF: 'ETF',
+    MUTUALFUND: '펀드',
+    INDEX: '지수',
+    CRYPTOCURRENCY: '코인',
+    CURRENCY: '환율',
+    FUTURE: '선물',
+    OPTION: '옵션',
+  }
+  return map[type.toUpperCase()] || type
+}
+
+function formatNumber(value: any) {
+  if (value == null || Number.isNaN(Number(value))) return '데이터 없음'
+  return new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 }).format(Number(value))
+}
+
+function formatMoney(value: any, currency = 'KRW') {
+  if (value == null || Number.isNaN(Number(value))) return '데이터 없음'
+  const num = Number(value)
+  const cur = (currency || 'KRW').toUpperCase()
+  if (cur === 'KRW') return `₩${new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 0 }).format(num)}`
+  if (cur === 'USD') return `$${new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(num)}`
+  return `${new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 }).format(num)} ${cur}`
+}
+
+function formatPercent(value: any) {
+  if (value == null || Number.isNaN(Number(value))) return '–'
+  const num = Number(value)
+  return `${num >= 0 ? '+' : ''}${num.toFixed(2)}%`
+}
+
+function App() {
+  const [token, setToken] = useState(() => localStorage.getItem('kft_token') || '')
+  const [phase, setPhase] = useState<'loading' | 'gate' | 'ready'>('loading')
+  const [initialized, setInitialized] = useState(false)
+  const [needsOnboarding, setNeedsOnboarding] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    const bootstrap = async () => {
+      try {
+        const status = await apiFetch('/api/auth/status')
+        if (!cancelled) setInitialized(Boolean(status?.initialized))
+      } catch {
+        if (!cancelled) setInitialized(false)
+      }
+      const existing = localStorage.getItem('kft_token') || ''
+      if (!existing) {
+        if (!cancelled) setPhase('gate')
+        return
+      }
+      try {
+        const onboarding = await apiFetch('/api/settings/onboarding', {
+          headers: { Authorization: `Bearer ${existing}` },
+        })
+        if (cancelled) return
+        setNeedsOnboarding(onboarding?.value?.done !== true)
+        setPhase('ready')
+      } catch {
+        if (cancelled) return
+        localStorage.removeItem('kft_token')
+        setToken('')
+        setPhase('gate')
+      }
+    }
+    void bootstrap()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Mid-session 401 (token expired/revoked) → re-lock to the gate.
+  useEffect(() => {
+    const onUnauthorized = () => {
+      localStorage.removeItem('kft_token')
+      setToken('')
+      setPhase('gate')
+    }
+    window.addEventListener('kft-unauthorized', onUnauthorized)
+    return () => window.removeEventListener('kft-unauthorized', onUnauthorized)
+  }, [])
+
+  if (phase === 'loading') {
+    return (
+      <div className="auth-splash">
+        <span>불러오는 중…</span>
+      </div>
+    )
+  }
+
+  if (phase === 'gate') {
+    return (
+      <AuthGate
+        initialized={initialized}
+        onAuthed={(tok, isFirst) => {
+          localStorage.setItem('kft_token', tok)
+          setToken(tok)
+          setPhase('ready')
+          if (isFirst) {
+            setNeedsOnboarding(true)
+          } else {
+            // returning unlock: resurface onboarding only if never completed
+            apiFetch('/api/settings/onboarding', { headers: { Authorization: `Bearer ${tok}` } })
+              .then((res) => setNeedsOnboarding(res?.value?.done !== true))
+              .catch(() => setNeedsOnboarding(false))
+          }
+        }}
+      />
+    )
+  }
+
+  return (
+    <>
+      <Terminal
+        token={token}
+        onLock={() => {
+          localStorage.removeItem('kft_token')
+          setToken('')
+          setPhase('gate')
+        }}
+      />
+      {needsOnboarding && (
+        <OnboardingWizard
+          authHeaders={{ Authorization: `Bearer ${token}` }}
+          onClose={() => setNeedsOnboarding(false)}
+        />
+      )}
+    </>
+  )
+}
+
+function AuthGate({
+  initialized,
+  onAuthed,
+}: {
+  initialized: boolean
+  onAuthed: (token: string, isFirst: boolean) => void
+}) {
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+    if (initialized) {
+      if (!password) {
+        setError('비밀번호를 입력하세요.')
+        return
+      }
+      setBusy(true)
+      try {
+        const response = await fetch(`${API_BASE}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        })
+        if (response.status === 401) {
+          setError('비밀번호가 올바르지 않습니다.')
+          return
+        }
+        if (response.status === 429) {
+          setError('시도가 많습니다. 잠시 후 다시 시도하세요.')
+          return
+        }
+        if (!response.ok) {
+          setError('로그인에 실패했습니다. 잠시 후 다시 시도하세요.')
+          return
+        }
+        const data = await response.json()
+        onAuthed(data.token, false)
+      } catch {
+        setError('서버에 연결할 수 없습니다.')
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+    // 최초 설정
+    if (password.length < 8) {
+      setError('비밀번호는 8자 이상이어야 합니다.')
+      return
+    }
+    if (password !== confirm) {
+      setError('두 비밀번호가 일치하지 않습니다.')
+      return
+    }
+    setBusy(true)
+    try {
+      const data = await apiFetch('/api/auth/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      })
+      onAuthed(data.token, true)
+    } catch (err: any) {
+      setError(err?.message || '설정에 실패했습니다.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="auth-gate">
+      <form className="auth-card" onSubmit={submit}>
+        <div className="auth-brand">
+          <span className="brand-mark">KT</span>
+          <strong>한국어 금융 터미널</strong>
+        </div>
+        {initialized ? (
+          <>
+            <h1>잠금 해제</h1>
+            <p className="auth-sub">마스터 비밀번호를 입력해 앱을 잠금 해제하세요.</p>
+            <label className="auth-field">
+              <span><Lock size={13} /> 비밀번호</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="마스터 비밀번호"
+                autoFocus
+              />
+            </label>
+          </>
+        ) : (
+          <>
+            <h1>마스터 비밀번호 설정</h1>
+            <p className="auth-sub">이 비밀번호로 앱을 잠그고 저장된 데이터·API 키를 보호합니다. 분실 시 복구할 수 없습니다.</p>
+            <label className="auth-field">
+              <span><KeyRound size={13} /> 새 비밀번호</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="8자 이상"
+                autoFocus
+              />
+            </label>
+            <label className="auth-field">
+              <span><KeyRound size={13} /> 비밀번호 확인</span>
+              <input
+                type="password"
+                value={confirm}
+                onChange={(event) => setConfirm(event.target.value)}
+                placeholder="한 번 더 입력"
+              />
+            </label>
+          </>
+        )}
+        {error && <div className="auth-error">{error}</div>}
+        <button className="auth-submit" type="submit" disabled={busy}>
+          {busy ? '처리 중…' : initialized ? '잠금 해제' : '비밀번호 설정'}
+        </button>
+      </form>
+    </div>
+  )
+}
+
+type OnboardKeyProvider = 'gemini' | 'dart'
+
+function OnboardingWizard({
+  authHeaders,
+  onClose,
+}: {
+  authHeaders: Record<string, string>
+  onClose: () => void
+}) {
+  const [step, setStep] = useState(0)
+  const [geminiKey, setGeminiKey] = useState('')
+  const [dartKey, setDartKey] = useState('')
+  const [geminiSaved, setGeminiSaved] = useState(false)
+  const [dartSaved, setDartSaved] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const steps = ['환영', 'Gemini 키', 'DART 키', '완료']
+  const last = steps.length - 1
+
+  const saveKey = async (provider: OnboardKeyProvider, value: string, markSaved: (v: boolean) => void) => {
+    const trimmed = value.trim()
+    if (!trimmed) {
+      setError('키를 입력하세요.')
+      return
+    }
+    setError('')
+    setBusy(true)
+    try {
+      await apiFetch('/api/api-keys', {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, label: provider, value: trimmed }),
+      })
+      markSaved(true)
+    } catch (err: any) {
+      setError(err?.message || '저장에 실패했습니다.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const finish = async () => {
+    setError('')
+    setBusy(true)
+    try {
+      await apiFetch('/api/settings/onboarding', {
+        method: 'PUT',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: { done: true } }),
+      })
+      onClose()
+    } catch (err: any) {
+      setError(err?.message || '저장에 실패했습니다.')
+      setBusy(false)
+    }
+  }
+
+  const goNext = () => {
+    setError('')
+    setStep((s) => Math.min(s + 1, last))
+  }
+  const goPrev = () => {
+    setError('')
+    setStep((s) => Math.max(s - 1, 0))
+  }
+
+  return (
+    <div className="onboard-overlay">
+      <div className="onboard-card">
+        <div className="onboard-dots">
+          {steps.map((label, i) => (
+            <span key={label} className={`onboard-dot ${i === step ? 'active' : ''} ${i < step ? 'done' : ''}`} title={label} />
+          ))}
+        </div>
+
+        {step === 0 && (
+          <div className="onboard-body">
+            <h2>환영합니다 👋</h2>
+            <p>이 앱은 <strong>API 키 없이도</strong> 시세·차트·한국 뉴스를 바로 사용할 수 있습니다.</p>
+            <p className="onboard-muted">
+              키를 추가하면 기능이 더해집니다:
+            </p>
+            <ul className="onboard-list">
+              <li><strong>Gemini</strong> — AI 번역·분석</li>
+              <li><strong>DART</strong> — 한국 공시(전자공시)</li>
+            </ul>
+            <p className="onboard-muted">키는 모두 선택 사항이며 나중에 설정에서 추가할 수 있습니다.</p>
+          </div>
+        )}
+
+        {step === 1 && (
+          <div className="onboard-body">
+            <h2>Gemini 키 <span className="onboard-opt">(선택)</span></h2>
+            <p className="onboard-muted">AI 번역·분석을 켜려면 Google AI Studio에서 무료 키를 발급받으세요.</p>
+            <ol className="onboard-steps">
+              <li>
+                <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">
+                  aistudio.google.com/app/apikey
+                </a> 접속
+              </li>
+              <li>Google 계정으로 로그인</li>
+              <li>"Create API key" 클릭</li>
+              <li>생성된 키 복사 후 아래에 붙여넣기</li>
+            </ol>
+            <div className="onboard-keyrow">
+              <input
+                type="password"
+                value={geminiKey}
+                onChange={(event) => { setGeminiKey(event.target.value); setGeminiSaved(false) }}
+                placeholder="Gemini API 키 붙여넣기"
+              />
+              <button type="button" disabled={busy} onClick={() => saveKey('gemini', geminiKey, setGeminiSaved)}>
+                저장
+              </button>
+            </div>
+            {geminiSaved && <div className="onboard-saved"><Check size={13} /> 저장됨</div>}
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="onboard-body">
+            <h2>DART 키 <span className="onboard-opt">(선택)</span></h2>
+            <p className="onboard-muted">한국 전자공시(DART) 데이터를 보려면 오픈API 인증키를 발급받으세요.</p>
+            <ol className="onboard-steps">
+              <li>
+                <a href="https://opendart.fss.or.kr" target="_blank" rel="noopener noreferrer">
+                  opendart.fss.or.kr
+                </a> 접속
+              </li>
+              <li>인증키 신청/관리 → 오픈API 인증키 신청</li>
+              <li>이메일로 받은 인증키 복사 후 아래에 붙여넣기</li>
+            </ol>
+            <div className="onboard-keyrow">
+              <input
+                type="password"
+                value={dartKey}
+                onChange={(event) => { setDartKey(event.target.value); setDartSaved(false) }}
+                placeholder="DART 인증키 붙여넣기"
+              />
+              <button type="button" disabled={busy} onClick={() => saveKey('dart', dartKey, setDartSaved)}>
+                저장
+              </button>
+            </div>
+            {dartSaved && <div className="onboard-saved"><Check size={13} /> 저장됨</div>}
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className="onboard-body">
+            <h2>준비 완료 🎉</h2>
+            <ul className="onboard-list">
+              <li>시세·차트·한국 뉴스 — 바로 사용 가능</li>
+              <li>Gemini 키 {geminiSaved ? <span className="onboard-saved-inline"><Check size={12} /> 저장됨</span> : '— 미설정'}</li>
+              <li>DART 키 {dartSaved ? <span className="onboard-saved-inline"><Check size={12} /> 저장됨</span> : '— 미설정'}</li>
+            </ul>
+            <p className="onboard-muted">키는 나중에 설정에서 추가·변경할 수 있습니다.</p>
+          </div>
+        )}
+
+        {error && <div className="onboard-error">{error}</div>}
+
+        <div className="onboard-nav">
+          <button type="button" className="onboard-secondary" onClick={goPrev} disabled={step === 0 || busy}>
+            이전
+          </button>
+          {step < last ? (
+            <>
+              <button type="button" className="onboard-skip" onClick={finish} disabled={busy} title="온보딩 종료">
+                건너뛰기
+              </button>
+              <button type="button" className="onboard-primary" onClick={goNext} disabled={busy}>
+                다음
+              </button>
+            </>
+          ) : (
+            <button type="button" className="onboard-primary" onClick={finish} disabled={busy}>
+              {busy ? '저장 중…' : '시작하기'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default App

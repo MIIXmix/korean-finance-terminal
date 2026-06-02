@@ -1,0 +1,94 @@
+symbol,name,sector
+AAPL,Apple,Technology
+MSFT,Microsoft,Technology
+NVDA,NVIDIA,Technology
+AVGO,Broadcom,Technology
+AMD,Advanced Micro Devices,Technology
+QCOM,Qualcomm,Technology
+TXN,Texas Instruments,Technology
+INTC,Intel,Technology
+AMAT,Applied Materials,Technology
+MU,Micron Technology,Technology
+LRCX,Lam Research,Technology
+KLAC,KLA Corp,Technology
+ADI,Analog Devices,Technology
+NXPI,NXP Semiconductors,Technology
+MCHP,Microchip Technology,Technology
+ASML,ASML Holding,Technology
+CSCO,Cisco Systems,Technology
+ANSS,Ansys,Technology
+CDNS,Cadence Design,Technology
+SNPS,Synopsys,Technology
+CRWD,CrowdStrike,Technology
+FTNT,Fortinet,Technology
+PANW,Palo Alto Networks,Technology
+ADBE,Adobe,Technology
+INTU,Intuit,Technology
+ORCL,Oracle,Technology
+NOW,ServiceNow,Technology
+WDAY,Workday,Technology
+TEAM,Atlassian,Technology
+DDOG,Datadog,Technology
+ZS,Zscaler,Technology
+MRVL,Marvell Technology,Technology
+ON,ON Semiconductor,Technology
+GFS,GlobalFoundries,Technology
+GOOGL,Alphabet Class A,Communication Services
+GOOG,Alphabet Class C,Communication Services
+META,Meta Platforms,Communication Services
+NFLX,Netflix,Communication Services
+CMCSA,Comcast,Communication Services
+TMUS,T-Mobile US,Communication Services
+CHTR,Charter Communications,Communication Services
+WBD,Warner Bros Discovery,Communication Services
+EA,Electronic Arts,Communication Services
+TTWO,Take-Two Interactive,Communication Services
+AMZN,Amazon,Consumer Discretionary
+TSLA,Tesla,Consumer Discretionary
+BKNG,Booking Holdings,Consumer Discretionary
+MAR,Marriott International,Consumer Discretionary
+ABNB,Airbnb,Consumer Discretionary
+ORLY,O'Reilly Automotive,Consumer Discretionary
+ROST,Ross Stores,Consumer Discretionary
+LULU,Lululemon Athletica,Consumer Discretionary
+MELI,MercadoLibre,Consumer Discretionary
+PDD,PDD Holdings,Consumer Discretionary
+DASH,DoorDash,Consumer Discretionary
+CPRT,Copart,Consumer Discretionary
+PCAR,PACCAR,Consumer Discretionary
+PEP,PepsiCo,Consumer Staples
+COST,Costco Wholesale,Consumer Staples
+MDLZ,Mondelez International,Consumer Staples
+KDP,Keurig Dr Pepper,Consumer Staples
+KHC,Kraft Heinz,Consumer Staples
+MNST,Monster Beverage,Consumer Staples
+KVUE,Kenvue,Consumer Staples
+AMGN,Amgen,Health Care
+GILD,Gilead Sciences,Health Care
+VRTX,Vertex Pharmaceuticals,Health Care
+REGN,Regeneron Pharmaceuticals,Health Care
+ISRG,Intuitive Surgical,Health Care
+MRNA,Moderna,Health Care
+IDXX,IDEXX Laboratories,Health Care
+DXCM,DexCom,Health Care
+BIIB,Biogen,Health Care
+ILMN,Illumina,Health Care
+GEHC,GE HealthCare,Health Care
+HON,Honeywell International,Industrials
+ADP,Automatic Data Processing,Industrials
+CTAS,Cintas,Industrials
+CSX,CSX Corp,Industrials
+PAYX,Paychex,Industrials
+FAST,Fastenal,Industrials
+ODFL,Old Dominion Freight,Industrials
+CSGP,CoStar Group,Industrials
+VRSK,Verisk Analytics,Industrials
+ROP,Roper Technologies,Industrials
+AXON,Axon Enterprise,Industrials
+PYPL,PayPal Holdings,Financials
+FANG,Diamondback Energy,Energy
+EXC,Exelon,Utilities
+XEL,Xcel Energy,Utilities
+AEP,American Electric Power,Utilities
+CEG,Constellation Energy,Utilities
+LIN,Linde,Materials
