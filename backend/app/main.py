@@ -39,6 +39,7 @@ from .services.market_data import (
     quotes,
     search_symbols,
 )
+from .services.kis import KisError, inquire_balance, submit_order
 from .services.news import get_news
 from .services.portfolio import list_holdings, portfolio_summary
 
@@ -148,6 +149,20 @@ class PaperOrderIn(BaseModel):
 
 class AiAnalyzeIn(BaseModel):
     payload: dict[str, Any]
+
+
+class KisCredentialIn(BaseModel):
+    appkey: str = Field(min_length=8, max_length=128)
+    appsecret: str = Field(min_length=8, max_length=256)
+    account_no: str = Field(min_length=8, max_length=24)
+
+
+class KisOrderIn(BaseModel):
+    symbol: str = Field(min_length=1, max_length=12)
+    side: str = Field(pattern="^(buy|sell)$")
+    quantity: float = Field(gt=0)
+    order_type: str = Field(default="market", pattern="^(market|limit)$")
+    limit_price: float | None = Field(default=None, ge=0)
 
 
 # ── Login throttle (defense-in-depth against local brute force) ─────────────
@@ -536,6 +551,81 @@ def create_live_order(_: PaperOrderIn, _user: dict[str, Any] = Depends(require_a
 @app.post("/api/ai/analyze")
 async def api_ai(payload: AiAnalyzeIn, _user: dict[str, Any] = Depends(require_auth)) -> dict[str, Any]:
     return await analyze(payload.payload)
+
+
+# ── KIS 모의투자 (한국투자증권 OpenAPI, paper only) ─────────────────────────
+
+
+@app.get("/api/kis/status")
+def kis_status(_user: dict[str, Any] = Depends(require_auth)) -> dict[str, Any]:
+    return {"configured": get_api_key("kis") is not None, "mode": "mock"}
+
+
+@app.post("/api/kis/credential")
+def kis_save_credential(payload: KisCredentialIn, user: dict[str, Any] = Depends(require_auth)) -> dict[str, Any]:
+    blob = json_dumps({"appkey": payload.appkey, "appsecret": payload.appsecret, "account_no": payload.account_no})
+    encrypted = encrypt_secret(blob)
+    with get_db() as con:
+        con.execute("DELETE FROM api_keys WHERE user_id = ? AND lower(provider) = 'kis'", (user["id"],))
+        con.execute(
+            "INSERT INTO api_keys(user_id, provider, label, encrypted_value, masked_value) VALUES(?, 'kis', ?, ?, ?)",
+            (user["id"], "KIS 모의투자", encrypted, mask_secret(payload.appkey)),
+        )
+    return {"status": "saved", "provider": "kis"}
+
+
+@app.delete("/api/kis/credential")
+def kis_delete_credential(user: dict[str, Any] = Depends(require_auth)) -> dict[str, Any]:
+    with get_db() as con:
+        con.execute("DELETE FROM api_keys WHERE user_id = ? AND lower(provider) = 'kis'", (user["id"],))
+    return {"status": "deleted"}
+
+
+@app.post("/api/orders/kis")
+async def kis_order(payload: KisOrderIn, user: dict[str, Any] = Depends(require_auth)) -> dict[str, Any]:
+    cred = get_api_key("kis")
+    if not cred:
+        raise HTTPException(status_code=424, detail="kis_credential_required")
+    try:
+        result = await submit_order(
+            cred,
+            symbol=payload.symbol,
+            side=payload.side,
+            quantity=payload.quantity,
+            order_type=payload.order_type,
+            limit_price=payload.limit_price,
+        )
+    except KisError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # 모의 주문 이력 기록
+    with get_db() as con:
+        con.execute(
+            """
+            INSERT INTO paper_orders(user_id, symbol, side, quantity, order_type, limit_price, mode, status, note)
+            VALUES(?, ?, ?, ?, ?, ?, 'kis_mock', 'accepted_kis_mock', ?)
+            """,
+            (
+                user["id"],
+                payload.symbol.upper(),
+                payload.side,
+                payload.quantity,
+                payload.order_type,
+                payload.limit_price,
+                f"KIS 모의 주문번호 {result.get('orderNo') or '-'}",
+            ),
+        )
+    return result
+
+
+@app.get("/api/kis/balance")
+async def kis_balance(_user: dict[str, Any] = Depends(require_auth)) -> dict[str, Any]:
+    cred = get_api_key("kis")
+    if not cred:
+        raise HTTPException(status_code=424, detail="kis_credential_required")
+    try:
+        return await inquire_balance(cred)
+    except KisError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ── Static frontend ────────────────────────────────────────────────────────

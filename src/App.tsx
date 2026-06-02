@@ -1284,12 +1284,27 @@ function OrderPanel({ selectedSymbol, token, authHeaders }: any) {
   const [quantity, setQuantity] = useState('1')
   const [limit, setLimit] = useState('')
   const [result, setResult] = useState<any>(null)
+  // KIS 모의투자
+  const [mode, setMode] = useState<'internal' | 'kis'>('internal')
+  const [kisConfigured, setKisConfigured] = useState(false)
+  const [appkey, setAppkey] = useState('')
+  const [appsecret, setAppsecret] = useState('')
+  const [account, setAccount] = useState('')
+  const [balance, setBalance] = useState<any>(null)
+  const [kisMsg, setKisMsg] = useState('')
+
+  useEffect(() => {
+    if (!token) return
+    void apiFetch('/api/kis/status').then((d) => setKisConfigured(!!d?.configured)).catch(() => undefined)
+  }, [token])
+
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!token) {
-      setResult({ status: 'login_required', message: '로그인 후 모의 주문 가능' })
+      setResult({ status: 'login_required', message: '로그인 후 주문 가능' })
       return
     }
+    const isKis = mode === 'kis'
     const payload = {
       symbol: selectedSymbol,
       side,
@@ -1298,7 +1313,7 @@ function OrderPanel({ selectedSymbol, token, authHeaders }: any) {
       limit_price: limit ? Number(limit) : null,
     }
     try {
-      const data = await apiFetch('/api/orders/paper', {
+      const data = await apiFetch(isKis ? '/api/orders/kis' : '/api/orders/paper', {
         method: 'POST',
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -1308,19 +1323,85 @@ function OrderPanel({ selectedSymbol, token, authHeaders }: any) {
       setResult({ status: 'error', message: error.message })
     }
   }
+
+  const saveKisCred = async () => {
+    setKisMsg('')
+    try {
+      await apiFetch('/api/kis/credential', {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appkey: appkey.trim(), appsecret: appsecret.trim(), account_no: account.trim() }),
+      })
+      setKisConfigured(true)
+      setAppkey(''); setAppsecret('')
+      setKisMsg('KIS 모의투자 키 저장됨')
+    } catch (error: any) {
+      setKisMsg(`저장 실패: ${error.message}`)
+    }
+  }
+
+  const loadBalance = async () => {
+    setKisMsg('')
+    try {
+      const b = await apiFetch('/api/kis/balance')
+      setBalance(b)
+    } catch (error: any) {
+      setKisMsg(`잔고 조회 실패: ${error.message}`)
+    }
+  }
+
+  const okStatus = result?.status === 'accepted_paper' || result?.status === 'accepted_kis_mock'
   return (
     <form className="order-form" onSubmit={submit}>
-      <div className="mode-banner paper">PAPER TRADING ONLY</div>
-      <label>종목<input value={selectedSymbol} readOnly /></label>
-      <div className="side-toggle">
-        <button type="button" className={side === 'buy' ? 'active buy' : ''} onClick={() => setSide('buy')}>Buy</button>
-        <button type="button" className={side === 'sell' ? 'active sell' : ''} onClick={() => setSide('sell')}>Sell</button>
+      <div className="side-toggle order-mode">
+        <button type="button" className={mode === 'internal' ? 'active' : ''} onClick={() => setMode('internal')}>내부 모의</button>
+        <button type="button" className={mode === 'kis' ? 'active' : ''} onClick={() => setMode('kis')}>KIS 모의투자</button>
       </div>
-      <label>수량<input value={quantity} onChange={(event) => setQuantity(event.target.value)} inputMode="decimal" /></label>
-      <label>지정가<input value={limit} onChange={(event) => setLimit(event.target.value)} placeholder="비우면 시장가 모의주문" inputMode="decimal" /></label>
-      <button className="primary" type="submit">모의 주문 보내기</button>
-      <p className="guard-copy">모의(연습) 주문입니다 — 실제 체결·자금 이동 없음. 실거래는 수수료·세금이 별도로 붙고 손실 위험이 있습니다. 실제 주문은 LIVE_TRADING_ENABLED와 브로커 어댑터가 모두 켜진 경우에만 별도 경로로 동작합니다.</p>
-      {result && <StatusBadge status={result.status === 'accepted_paper' ? 'ok' : 'error'} message={result.message || result.status} />}
+      <div className="mode-banner paper">{mode === 'kis' ? 'KIS 모의투자 (실거래 아님)' : 'PAPER TRADING ONLY'}</div>
+
+      {mode === 'kis' && !kisConfigured ? (
+        <div className="kis-cred">
+          <p className="hint">한국투자증권 <strong>모의투자</strong> 신청 후 발급받은 키를 입력하세요. (실거래 아님)
+            <br />apiportal.koreainvestment.com → 모의투자 신청 → 앱키·시크릿·모의계좌.</p>
+          <label>App Key<input value={appkey} onChange={(e) => setAppkey(e.target.value)} placeholder="모의투자 App Key" autoComplete="off" /></label>
+          <label>App Secret<input type="password" value={appsecret} onChange={(e) => setAppsecret(e.target.value)} placeholder="App Secret" autoComplete="off" /></label>
+          <label>모의 계좌번호<input value={account} onChange={(e) => setAccount(e.target.value)} placeholder="예: 50012345-01" autoComplete="off" /></label>
+          <button type="button" className="primary" onClick={saveKisCred}>KIS 키 저장</button>
+        </div>
+      ) : (
+        <>
+          <label>종목<input value={selectedSymbol} readOnly /></label>
+          {mode === 'kis' && <small className="form-help">국내주식 6자리 종목코드만 (예: 005930). 시장가/지정가 모의 체결.</small>}
+          <div className="side-toggle">
+            <button type="button" className={side === 'buy' ? 'active buy' : ''} onClick={() => setSide('buy')}>매수</button>
+            <button type="button" className={side === 'sell' ? 'active sell' : ''} onClick={() => setSide('sell')}>매도</button>
+          </div>
+          <label>수량<input value={quantity} onChange={(event) => setQuantity(event.target.value)} inputMode="decimal" /></label>
+          <label>지정가<input value={limit} onChange={(event) => setLimit(event.target.value)} placeholder="비우면 시장가" inputMode="decimal" /></label>
+          <button className="primary" type="submit">{mode === 'kis' ? 'KIS 모의 주문' : '모의 주문 보내기'}</button>
+          {mode === 'kis' && (
+            <div className="side-toggle">
+              <button type="button" onClick={loadBalance}>잔고 조회</button>
+              <button type="button" onClick={() => { void apiFetch('/api/kis/credential', { method: 'DELETE', headers: authHeaders }).then(() => { setKisConfigured(false); setBalance(null); setKisMsg('KIS 키 삭제됨') }) }}>키 삭제</button>
+            </div>
+          )}
+        </>
+      )}
+
+      <p className="guard-copy">모의(연습) 주문입니다 — 실제 체결·자금 이동 없음. {mode === 'kis' ? 'KIS 모의투자 서버로만 전송되며 실거래 도메인은 호출하지 않습니다.' : ''} 실거래는 수수료·세금이 붙고 손실 위험이 있습니다.</p>
+      {kisMsg && <StatusBadge status={kisMsg.includes('실패') ? 'error' : 'ok'} message={kisMsg} />}
+      {result && <StatusBadge status={okStatus ? 'ok' : 'error'} message={result.message || result.orderNo || result.status} />}
+      {balance && (
+        <div className="kis-balance">
+          <div className="kis-bal-head">KIS 모의 잔고</div>
+          <div className="kis-bal-row"><span>예수금</span><strong>{formatMoney(balance.cash, 'KRW')}</strong></div>
+          <div className="kis-bal-row"><span>총 평가</span><strong>{formatMoney(balance.totalEval, 'KRW')}</strong></div>
+          <div className="kis-bal-row"><span>평가 손익</span><strong className={(balance.totalPnl ?? 0) >= 0 ? 'up' : 'down'}>{formatMoney(balance.totalPnl, 'KRW')}</strong></div>
+          {(balance.holdings || []).map((h: any) => (
+            <div className="kis-bal-hold" key={h.symbol}>{h.name || h.symbol} · {formatNumber(h.quantity)}주 · {h.pnlPercent == null ? '–' : formatPercent(h.pnlPercent)}</div>
+          ))}
+        </div>
+      )}
       <DisclaimerNote />
     </form>
   )
