@@ -1312,6 +1312,66 @@ input {
   color: var(--text);
 }
 
+.pf-cost-note {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--amber);
+}
+
+.disclaimer-note {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background: #0c0f0a;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.risk-alert {
+  border: 1px solid var(--amber);
+  background: #1a1405;
+  color: var(--amber);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.risk-alert.severe {
+  border-color: var(--red);
+  background: #1c0a0d;
+  color: var(--red);
+}
+
+.onboard-risk {
+  margin-top: 10px;
+  border: 1px solid var(--amber);
+  background: #1a1405;
+  border-radius: 5px;
+  padding: 9px 11px;
+}
+
+.onboard-risk strong {
+  color: var(--amber);
+  font-size: 12px;
+}
+
+.onboard-risk ul {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  display: grid;
+  gap: 3px;
+}
+
+.onboard-risk li {
+  font-size: 11px;
+  color: var(--text);
+  line-height: 1.45;
+}
+
 .he-sym-link {
   background: transparent;
   border: 0;

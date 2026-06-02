@@ -1319,8 +1319,9 @@ function OrderPanel({ selectedSymbol, token, authHeaders }: any) {
       <label>수량<input value={quantity} onChange={(event) => setQuantity(event.target.value)} inputMode="decimal" /></label>
       <label>지정가<input value={limit} onChange={(event) => setLimit(event.target.value)} placeholder="비우면 시장가 모의주문" inputMode="decimal" /></label>
       <button className="primary" type="submit">모의 주문 보내기</button>
-      <p className="guard-copy">실제 주문은 설정에서 LIVE_TRADING_ENABLED와 브로커 어댑터가 모두 켜진 경우에만 별도 경로로 동작합니다.</p>
+      <p className="guard-copy">모의(연습) 주문입니다 — 실제 체결·자금 이동 없음. 실거래는 수수료·세금이 별도로 붙고 손실 위험이 있습니다. 실제 주문은 LIVE_TRADING_ENABLED와 브로커 어댑터가 모두 켜진 경우에만 별도 경로로 동작합니다.</p>
       {result && <StatusBadge status={result.status === 'accepted_paper' ? 'ok' : 'error'} message={result.message || result.status} />}
+      <DisclaimerNote />
     </form>
   )
 }
@@ -1753,12 +1754,13 @@ function PortfolioControls({ token, authHeaders, loadPortfolio, portfolio, setSe
           <div className="pf-preview">
             현재가 <strong>{formatMoney(preview.price, preview.currency)}</strong>
             {Number(quantity) > 0 && <> · {Number(quantity)}주 ≈ <strong>{formatMoney(preview.price * Number(quantity), preview.currency)}</strong></>}
+            <span className="pf-cost-note">실제 매매 시 수수료·세금 별도</span>
           </div>
         )}
         <button type="button" className="primary" disabled={busy} onClick={addAtMarket}>
           {busy ? '처리 중…' : '현재가로 담기'}
         </button>
-        <small className="form-help">지금 시세로 담습니다(평단=현재가). 처음 사는 종목은 이 버튼.</small>
+        <small className="form-help">기록·모의용입니다(실거래 아님). 지금 시세를 평단으로 담습니다. 수수료·세금은 반영되지 않으니 실제 수익률은 더 낮습니다.</small>
         <details className="pf-manual">
           <summary>이미 보유한 종목 직접 기록 (평단 입력)</summary>
           <label>평균 매입가 ({cfg.currency})
@@ -1858,6 +1860,7 @@ function PortfolioPanel({ portfolio, setPortfolioFocus, setSelectedSymbol, setAc
         })}
       </div>
       <StatusBadge status={portfolio.status} message={portfolio.message} />
+      <DisclaimerNote />
     </div>
   )
 }
@@ -1911,11 +1914,26 @@ function DonutChart({ data, title }: { data: Array<{ name: string; weight: numbe
 }
 
 function PortfolioRisk({ portfolio }: any) {
-  if (!portfolio || !(portfolio.holdings || []).length) return <EmptyState text="보유 종목을 추가하면 집중도·점검 신호가 표시됩니다" />
+  const holdings: any[] = portfolio?.holdings || []
+  if (!portfolio || !holdings.length) return <EmptyState text="보유 종목을 추가하면 집중도·점검 신호가 표시됩니다" />
+  const maxWeight = Math.max(0, ...holdings.map((h) => h.weight ?? 0))
+  // 분산/집중 경고 (책임투자)
+  const alerts: Array<{ tone: 'down' | 'delayed'; msg: string }> = []
+  if (holdings.length === 1) {
+    alerts.push({ tone: 'down', msg: '한 종목에만 투자 — 분산이 전혀 안 됐습니다. 한 종목 급락 시 계좌 전체가 흔들립니다.' })
+  }
+  if (maxWeight >= 60) {
+    alerts.push({ tone: 'down', msg: `최대 비중 ${maxWeight.toFixed(1)}% — 과도한 집중. 한 종목 의존도가 큽니다.` })
+  } else if (maxWeight >= 40) {
+    alerts.push({ tone: 'delayed', msg: `최대 비중 ${maxWeight.toFixed(1)}% — 집중도 점검 권장.` })
+  }
   return (
     <div className="plain-list">
-      <p className="hint">한 종목 비중이 너무 크면(40% 이상) ‘집중도 점검’으로 알려드려요. 분산이 잘 됐는지 확인용입니다.</p>
-      {(portfolio.holdings || []).map((holding: any) => (
+      <p className="hint">한 종목 비중이 크거나(40%+) 분산이 안 되면 알려드려요. 분산은 손실 위험을 줄이는 기본입니다.</p>
+      {alerts.map((a) => (
+        <div className={`risk-alert ${a.tone === 'down' ? 'severe' : ''}`} key={a.msg}>⚠ {a.msg}</div>
+      ))}
+      {holdings.map((holding: any) => (
         <div className="status-row" key={holding.id}>
           <span>{holding.symbol} {holding.weight != null ? `· ${holding.weight}%` : ''}</span>
           <StatusBadge status={holding.rebalance === '정상' ? 'ok' : 'delayed'} message={holding.rebalance} />
@@ -2107,6 +2125,15 @@ function StatusBadge({ status, message }: { status: Status | string; message?: s
 
 function EmptyState({ text }: { text: string }) {
   return <div className="empty">{text}</div>
+}
+
+// 책임투자 — 상시 면책 한 줄 (포트폴리오·주문 하단)
+function DisclaimerNote() {
+  return (
+    <div className="disclaimer-note">
+      ⚠ 정보 제공용 · 투자 권유 아님 · 원금 손실 가능 · 지연 데이터 · 거래 시 수수료·세금 별도(증권사·시점마다 다름)
+    </div>
+  )
 }
 
 async function apiFetch(path: string, options: RequestInit = {}) {
@@ -2539,6 +2566,15 @@ function OnboardingWizard({
               <li><strong>DART</strong> — 한국 공시(전자공시)</li>
             </ul>
             <p className="onboard-muted">키는 모두 선택 사항이며 나중에 설정에서 추가할 수 있습니다.</p>
+            <div className="onboard-risk">
+              <strong>⚠ 시작 전 꼭 확인</strong>
+              <ul>
+                <li>이 앱은 <strong>정보 제공·기록용</strong>이며 매매 권유가 아닙니다.</li>
+                <li>모든 투자는 <strong>원금 손실</strong>이 날 수 있습니다.</li>
+                <li>시세는 <strong>지연·공개 데이터</strong>이고, 실제 거래엔 수수료·세금이 별도로 붙어 수익률이 더 낮아집니다.</li>
+                <li>‘담기/주문’은 <strong>모의·기록</strong>이며 실제 체결이 아닙니다.</li>
+              </ul>
+            </div>
           </div>
         )}
 
